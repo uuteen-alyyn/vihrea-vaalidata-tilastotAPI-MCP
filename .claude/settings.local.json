@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:stat.fi)",
+      "WebFetch(domain:pxdata.stat.fi)",
+      "Bash(npm install:*)",
+      "Bash(npm run:*)",
+      "Bash(node -e \":*)",
+      "Bash(curl -s \"https://pxdata.stat.fi/PXWeb/api/v1/fi/StatFin_Passiivi/evaa/\")",
+      "Bash(python3 -m json.tool)",
+      "Bash(curl -s \"https://pxdata.stat.fi/PXWeb/api/v1/fi/StatFin_Passiivi/evaa/170_evaa_2019_tau_170.px\")",
+      "Bash(curl -s \"https://pxdata.stat.fi/PXWeb/api/v1/fi/StatFin_Passiivi/evaa/120_evaa_2019_tau_102.px\")",
+      "Bash(curl -s \"https://pxdata.stat.fi/PXWeb/api/v1/fi/StatFin/evaa/statfin_evaa_pxt_13sx.px\")",
+      "Bash(curl -v -s -X POST \"https://pxdata.stat.fi/PXWeb/api/v1/fi/StatFin_Passiivi/evaa/170_evaa_2019_tau_170.px\" -H \"Content-Type: application/json\" -d '{\"\"\"\"query\"\"\"\":[{\"\"\"\"code\"\"\"\":\"\"\"\"Ehdokas\"\"\"\",\"\"\"\"selection\"\"\"\":{\"\"\"\"filter\"\"\"\":\"\"\"\"item\"\"\"\",\"\"\"\"values\"\"\"\":[\"\"\"\"01040228\"\"\"\"]}},{\"\"\"\"code\"\"\"\":\"\"\"\"Äänestysalue\"\"\"\",\"\"\"\"selection\"\"\"\":{\"\"\"\"filter\"\"\"\":\"\"\"\"all\"\"\"\",\"\"\"\"values\"\"\"\":[\"\"\"\"*\"\"\"\"]}},{\"\"\"\"code\"\"\"\":\"\"\"\"Äänestystiedot\"\"\"\",\"\"\"\"selection\"\"\"\":{\"\"\"\"filter\"\"\"\":\"\"\"\"item\"\"\"\",\"\"\"\"values\"\"\"\":[\"\"\"\"Äänimäärä yhteensä\"\"\"\"]}}],\"\"\"\"response\"\"\"\":{\"\"\"\"format\"\"\"\":\"\"\"\"json\"\"\"\"}}')",
+      "Bash(curl -s -X POST \"https://pxdata.stat.fi/PXWeb/api/v1/fi/StatFin_Passiivi/evaa/170_evaa_2019_tau_170.px\" -H \"Content-Type: application/json\" -d '{\"\"\"\"query\"\"\"\":[{\"\"\"\"code\"\"\"\":\"\"\"\"Ehdokas\"\"\"\",\"\"\"\"selection\"\"\"\":{\"\"\"\"filter\"\"\"\":\"\"\"\"item\"\"\"\",\"\"\"\"values\"\"\"\":[\"\"\"\"01040228\"\"\"\"]}},{\"\"\"\"code\"\"\"\":\"\"\"\"Aanestysalue\"\"\"\",\"\"\"\"selection\"\"\"\":{\"\"\"\"filter\"\"\"\":\"\"\"\"all\"\"\"\",\"\"\"\"values\"\"\"\":[\"\"\"\"*\"\"\"\"]}},{\"\"\"\"code\"\"\"\":\"\"\"\"Aanestystiedot\"\"\"\",\"\"\"\"selection\"\"\"\":{\"\"\"\"filter\"\"\"\":\"\"\"\"item\"\"\"\",\"\"\"\"values\"\"\"\":[\"\"\"\"Aanimaara yhteensa\"\"\"\"]}}],\"\"\"\"response\"\"\"\":{\"\"\"\"format\"\"\"\":\"\"\"\"json\"\"\"\"}}')",
+      "Bash(python3 -c \":*)",
+      "Bash(python3:*)"
+    ]
+  }
+}
