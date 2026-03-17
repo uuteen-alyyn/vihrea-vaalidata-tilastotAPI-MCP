@@ -497,3 +497,64 @@ Populate schemas for the existing 2023 and 2019 parliamentary entries.
 - [x] Update CLAUDE.md data coverage section
 - [x] Full cross-election integration test (one query per new election type)
 - [x] Mark Phase 11 complete in logbook
+
+---
+
+## Phase 12: Historical Parliamentary Candidate Data (2007–2015)
+
+**Goal:** Extend candidate data coverage to 2007, 2011, and 2015 parliamentary elections using StatFin_Passiivi archive tables.
+
+**Known unknowns:** Archive variable formats may differ across years (2019 already uses a different format than 2023). Each year may require its own normalization path or format detection.
+
+### Tasks
+- [ ] Research StatFin_Passiivi for 2015, 2011, 2007 parliamentary candidate table IDs
+- [ ] Fetch metadata for one table per year and compare variable structures to 2019 archive format
+- [ ] Determine if existing normalizer handles them or if new format variants are needed
+- [ ] Register 2015 candidate tables (13 vaalipiiri)
+- [ ] Register 2011 candidate tables (13 vaalipiiri)
+- [ ] Register 2007 candidate tables (13 vaalipiiri)
+- [ ] Live API smoke test for each year (one vaalipiiri per year)
+- [ ] Update `list_elections` data coverage output
+- [ ] Logbook entry
+
+---
+
+## Phase 13: Municipal 2021 Candidate Data Gap
+
+**Goal:** Determine whether per-äänestysalue candidate tables exist for municipal 2021 in StatFin_Passiivi, and register them if they do.
+
+**Context:** Municipal 2021 currently has party data only (via multi-year 14z7 table). Candidate-level queries for 2021 are unsupported. The 2025 tables (14v9–14vk) are registered and working.
+
+### Tasks
+- [ ] Search StatFin_Passiivi (`/fi/StatFin_Passiivi/kvaa/`) for 2021 candidate tables
+- [ ] If found: fetch metadata, verify variable format, register tables
+- [ ] If not found: add explicit caveat to `get_data_caveats` and `describe_election` for municipal 2021
+- [ ] Logbook entry with finding
+
+---
+
+## Phase 14: Cross-Election-Type Analytics Tool
+
+**Goal:** Add a tool that compares a party or candidate across different election types within a single response (e.g. SDP performance municipal 2021 → parliamentary 2023 → regional 2025).
+
+**Context:** Current `compare_elections` works within one election type only. Cross-type comparison requires normalizing vote share across fundamentally different electorate sizes, which must be handled carefully (caveats about incomparable denominators).
+
+### Tasks
+- [ ] Design tool schema: inputs (party or candidate name, list of election_type+year pairs), outputs (table + methodology note)
+- [ ] Implement `compare_across_elections` tool in analytics
+- [ ] Handle caveat: EU/presidential vote share not directly comparable to municipal/parliamentary
+- [ ] Test: SDP across municipal 2021, parliamentary 2023, regional 2025
+- [ ] Logbook entry
+
+---
+
+## Phase 15: System Prompt
+
+**Goal:** Write the system prompt that a consuming LLM (Claude in Claude Desktop) uses to understand which tools exist and how to orchestrate them for analyst queries.
+
+### Tasks
+- [ ] Draft system prompt covering all tool categories and election types
+- [ ] Add data coverage and known caveats section
+- [ ] Add worked examples (one per election type)
+- [ ] Test system prompt with real queries in Claude Desktop
+- [ ] Logbook entry
