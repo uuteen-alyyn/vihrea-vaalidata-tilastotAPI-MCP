@@ -8,10 +8,11 @@ export type ElectionType =
   | 'regional';       // Aluevaalit (alvaa)
 
 export type AreaLevel =
-  | 'aanestysalue'  // Voting district / polling area
-  | 'kunta'         // Municipality
-  | 'vaalipiiri'    // Electoral district
-  | 'koko_suomi';   // National total
+  | 'aanestysalue'    // Voting district / polling area
+  | 'kunta'           // Municipality
+  | 'vaalipiiri'      // Electoral district (parliamentary, municipal, EU)
+  | 'hyvinvointialue' // Welfare area (regional elections, aluevaalit)
+  | 'koko_suomi';     // National total
 
 /** One row in the canonical election data schema */
 export interface ElectionRecord {
@@ -28,6 +29,7 @@ export interface ElectionRecord {
   vote_share?: number;
   rank_within_party?: number;
   rank_overall?: number;
+  round?: number; // Presidential elections: 1 = first round, 2 = second round
 }
 
 /** Provenance metadata attached to every response */

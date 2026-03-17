@@ -1,6 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { ALL_ELECTION_TABLES } from '../../data/election-tables.js';
+import { ALL_ELECTION_TABLES, findPartyTableForType } from '../../data/election-tables.js';
 import type { AreaLevel } from '../../data/types.js';
 
 export function registerDiscoveryTools(server: McpServer): void {
@@ -11,7 +11,18 @@ export function registerDiscoveryTools(server: McpServer): void {
     {},
     async () => {
       const elections = ALL_ELECTION_TABLES.map((t) => {
-        const availableAreaLevels: AreaLevel[] = ['vaalipiiri', 'koko_suomi'];
+        const hasParty = !!(t.party_by_kunta ?? findPartyTableForType(t.election_type));
+        const hasCandidate = !!(t.candidate_by_aanestysalue || t.candidate_national);
+
+        const availableAreaLevels: AreaLevel[] = ['koko_suomi'];
+        if (t.party_by_kunta ?? findPartyTableForType(t.election_type)) {
+          // Parliamentary/municipal/EU use vaalipiiri; regional uses hyvinvointialue
+          if (t.election_type === 'regional') {
+            availableAreaLevels.push('hyvinvointialue');
+          } else {
+            availableAreaLevels.push('vaalipiiri');
+          }
+        }
         if (t.party_by_kunta) availableAreaLevels.push('kunta');
         if (t.candidate_by_aanestysalue || t.turnout_by_aanestysalue) {
           availableAreaLevels.push('aanestysalue');
@@ -20,8 +31,8 @@ export function registerDiscoveryTools(server: McpServer): void {
           election_type: t.election_type,
           year: t.year,
           available_area_levels: [...new Set(availableAreaLevels)],
-          candidate_data_available: !!t.candidate_by_aanestysalue,
-          party_data_available: !!t.party_by_kunta,
+          candidate_data_available: hasCandidate,
+          party_data_available: hasParty,
         };
       });
 
@@ -50,7 +61,12 @@ export function registerDiscoveryTools(server: McpServer): void {
         {
           level: 'vaalipiiri',
           fi: 'Vaalipiiri',
-          description: 'Electoral district — contains multiple kuntas. There are 13 vaalipiirit in Finland.',
+          description: 'Electoral district — contains multiple kuntas. There are 13 vaalipiirit in Finland (parliamentary, municipal, EU elections).',
+        },
+        {
+          level: 'hyvinvointialue',
+          fi: 'Hyvinvointialue',
+          description: 'Welfare area — used in regional (aluevaalit) elections. There are 21 hyvinvointialueet in Finland.',
         },
         {
           level: 'koko_suomi',
@@ -90,12 +106,30 @@ export function registerDiscoveryTools(server: McpServer): void {
         };
       }
 
+      const fallbackParty = findPartyTableForType(tables.election_type);
+      const hasParty = !!(tables.party_by_kunta ?? fallbackParty?.party_by_kunta);
+      const hasCandidate = !!(tables.candidate_by_aanestysalue || tables.candidate_national);
+
       const caveats: string[] = [];
       if (tables.candidate_by_aanestysalue) {
+        const unitLabel = tables.election_type === 'regional' ? 'hyvinvointialue' : 'vaalipiiri';
+        const unitCount = Object.keys(tables.candidate_by_aanestysalue).length;
         caveats.push(
-          'Candidate data with äänestysalue breakdown is stored in separate tables per vaalipiiri. ' +
-          'Fetching national candidate results requires querying all 13 vaalipiiri tables.'
+          `Candidate data with äänestysalue breakdown is stored in separate tables per ${unitLabel}. ` +
+          `Fetching national candidate results requires querying all ${unitCount} ${unitLabel} tables.`
         );
+      }
+      if (!tables.party_by_kunta && fallbackParty) {
+        caveats.push(
+          `Party data for ${tables.election_type} ${tables.year} is served from the multi-year table ` +
+          `(${fallbackParty.party_by_kunta}) registered on year ${fallbackParty.year}.`
+        );
+      }
+      if (tables.candidate_national) {
+        caveats.push('Candidate data is available as a single national table (no per-vaalipiiri breakdown).');
+      }
+      if (tables.election_type === 'presidential') {
+        caveats.push('Presidential elections have two rounds. Use the round parameter (1 or 2) to filter.');
       }
 
       return {
@@ -105,11 +139,12 @@ export function registerDiscoveryTools(server: McpServer): void {
             election_type: tables.election_type,
             year: tables.year,
             database: tables.database,
-            party_data_available: !!tables.party_by_kunta,
-            candidate_data_available: !!tables.candidate_by_aanestysalue,
+            party_data_available: hasParty,
+            candidate_data_available: hasCandidate,
             candidate_vaalipiirit: tables.candidate_by_aanestysalue
               ? Object.keys(tables.candidate_by_aanestysalue)
               : [],
+            candidate_national_table: tables.candidate_national ?? null,
             caveats,
           }, null, 2),
         }],
@@ -127,10 +162,11 @@ export function registerDiscoveryTools(server: McpServer): void {
           type: 'text' as const,
           text: JSON.stringify({
             hierarchy: [
-              { level: 'aanestysalue', parent: 'kunta', fi: 'Äänestysalue' },
-              { level: 'kunta', parent: 'vaalipiiri', fi: 'Kunta' },
-              { level: 'vaalipiiri', parent: 'koko_suomi', fi: 'Vaalipiiri' },
-              { level: 'koko_suomi', parent: null, fi: 'Koko Suomi' },
+              { level: 'aanestysalue', parent: 'kunta', fi: 'Äänestysalue', elections: ['parliamentary', 'municipal', 'regional', 'eu_parliament', 'presidential'] },
+              { level: 'kunta', parent: 'vaalipiiri', fi: 'Kunta', elections: ['parliamentary', 'municipal', 'eu_parliament'] },
+              { level: 'vaalipiiri', parent: 'koko_suomi', fi: 'Vaalipiiri', elections: ['parliamentary', 'municipal', 'eu_parliament', 'presidential'] },
+              { level: 'hyvinvointialue', parent: 'koko_suomi', fi: 'Hyvinvointialue', elections: ['regional'] },
+              { level: 'koko_suomi', parent: null, fi: 'Koko Suomi', elections: ['parliamentary', 'municipal', 'regional', 'eu_parliament', 'presidential'] },
             ],
           }, null, 2),
         }],

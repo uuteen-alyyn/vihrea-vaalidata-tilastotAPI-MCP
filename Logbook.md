@@ -244,3 +244,80 @@ Implementation_plan.md was also significantly behind — many completed tasks an
 - Added confirmed finding: 13t3 has no area variable — national candidate summary only, no geographic breakdown
 
 ---
+
+## PHASE 11A–B ARCHITECTURAL REFACTOR AND MULTI-ELECTION WIRING 2026-03-17 20:54:34
+
+### What was done
+
+**Phase 11A: Core architecture made election-agnostic**
+
+`src/data/types.ts`:
+- Added `hyvinvointialue` to `AreaLevel` union (for regional/aluevaalit elections)
+- Added `round?: number` to `ElectionRecord` (for presidential elections, 1 = first round, 2 = second round)
+
+`src/data/election-tables.ts`:
+- Added `PartyTableSchema` interface encoding per-election variable names, codes, area format, national code, gender filter
+- Added `candidate_national?` field to `ElectionTableSet` for EU/presidential single-table candidate data
+- Added `geographic_unit_type?` field
+- Registered schemas: PARLIAMENTARY_PARTY_SCHEMA, MUNICIPAL_PARTY_SCHEMA, REGIONAL_PARTY_SCHEMA, EU_PARTY_SCHEMA (presidential has no party table)
+- Added fallback function `findPartyTableForType(type)` — finds most-recent entry that has party_by_kunta
+- Registered full table entries:
+  - MUNICIPAL_TABLES: 2025 (party 14z7, 12 vaalipiiri candidate tables 14v9–14vk), 2021 stub
+  - REGIONAL_TABLES: 2025 (party 14y4, 21 hyvinvointialue candidate tables 14zu–151p), 2022 stub
+  - EU_TABLES: 2024 (party 14gv, candidate_national 14gy), 2019 (archive candidate)
+  - PRESIDENTIAL_TABLES: 2024 (candidate_national 14d5, turnout 14d6)
+
+`src/data/normalizer.ts`:
+- `inferPartyAreaLevel(code, schema)` — schema-driven area level inference for party tables
+- `normalizePartyTable(response, metadata, year, electionType, schema)` — generic party normalizer handling both content-column and Sar-dimension formats, all election types
+- `normalizePartyByKunta` kept as `@deprecated` wrapper
+- `normalizeCandidateByAanestysalue` extended with `electionType` param, handles EU (no area var), presidential (Kierros round var, codes '00'/'11' skipped), `Alue` as valid area variable name
+
+`src/data/loaders.ts`:
+- `loadPartyResults(year, areaId?, electionType)` — election_type routing with correct `??` fallback logic; translates `'SSS'`/`'national'` to schema's `national_code`
+- `loadCandidateResults(year, unitKey, candidateId?, electionType, roundFilter?)` — routes to `candidate_national` when unitKey is undefined or 'national'; multi-area-var detection
+- `CandidateLoadResult` — renamed `vaalipiiri_code` → `unit_code` with deprecated alias
+
+**Phase 11B–D: Retrieval tools wired for all election types**
+
+`src/tools/retrieval/index.ts`:
+- `get_party_results` — added `election_type` parameter, now delegates fully to `loadPartyResults`
+- `get_candidate_results` — added `election_type`, `unit_key`, `round` parameters; delegates to `loadCandidateResults`; supports parliamentary, municipal, regional, EU, presidential
+
+`src/tools/discovery/index.ts`:
+- `list_elections` — now uses `findPartyTableForType` fallback for `party_data_available`; checks `candidate_national` for `candidate_data_available`; includes `hyvinvointialue` for regional elections
+- `describe_election` — improved caveats for multi-year tables, national tables, presidential rounds
+- `list_area_levels` — added `hyvinvointialue` entry
+- `get_area_hierarchy` — annotated with election types per level
+
+### Key decisions
+
+- Multi-year tables (14z7 municipal, 14y4 regional, 14gv EU) are registered once on most-recent year; older years fall back via `findPartyTableForType`
+- EU table uses 5-digit area codes; `'SSS'` passed by callers is translated to schema's `national_code` (`'00000'`)
+- Municipal/regional all-candidate queries 403 when cell count exceeds ~300k. Single-candidate queries work. This is a documented API limitation.
+- Presidential non-candidate rows (codes '00' and '11') filtered via `SKIP_CANDIDATE_CODES` set
+
+### Test results (live API 2026-03-17)
+
+Party results:
+- parliamentary 2023 national: 23 rows, 644 555 votes ✓
+- municipal 2025 national: 17 rows, 557 770 votes ✓
+- municipal 2021 national: 20 rows, 433 811 votes ✓ (fallback to 14z7)
+- regional 2025 national: 17 rows, 444 404 votes ✓
+- regional 2022 national: 20 rows, 359 462 votes ✓ (fallback to 14y4)
+- eu_parliament 2024 national: 14 rows, 453 636 votes ✓
+- eu_parliament 2019 national: 18 rows, 380 460 votes ✓ (fallback to 14gv)
+
+Candidate results:
+- parliamentary 2023 helsinki: 49 517 rows ✓
+- eu_parliament 2024 national: 232 rows ✓
+- eu_parliament 2019 national: 269 rows ✓
+- presidential 2024 all rounds: 22 869 rows ✓
+- presidential 2024 round 1 only: 18 711 rows ✓
+- regional 2025 pirkanmaa single-candidate: 188 rows ✓
+- municipal 2025 pirkanmaa single-candidate: 187 rows ✓
+- municipal/regional all-candidates: 403 Forbidden (expected, 1M+ cells)
+
+Build: clean (tsc, no errors).
+
+---

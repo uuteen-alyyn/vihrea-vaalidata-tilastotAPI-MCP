@@ -10,9 +10,17 @@ import {
   getElectionTables,
   getDatabasePath,
 } from '../../data/election-tables.js';
+import {
+  loadPartyResults,
+  loadCandidateResults,
+} from '../../data/loaders.js';
 import { parseOutputMode } from '../../utils/output-mode.js';
-import type { ElectionRecord } from '../../data/types.js';
+import type { ElectionRecord, ElectionType } from '../../data/types.js';
 import type { PxWebTableMetadata } from '../../api/types.js';
+
+const ELECTION_TYPE_PARAM = z.enum(['parliamentary', 'municipal', 'eu_parliament', 'presidential', 'regional'])
+  .optional()
+  .describe('Election type. Defaults to "parliamentary".');
 
 // ─── Shared fetch helpers ───────────────────────────────────────────────────
 
@@ -32,214 +40,66 @@ export function registerRetrievalTools(server: McpServer): void {
   // ── get_party_results ────────────────────────────────────────────────────
   server.tool(
     'get_party_results',
-    'Returns party vote results for a parliamentary election. Uses the Tilastokeskus StatFin party-by-kunta table which covers all elections 1983–2023.',
+    'Returns party vote results for any Finnish election type and year. Supports parliamentary (1983–2023), municipal (1976–2025), regional (2022–2025), EU parliament (1996–2024), and presidential (2024).',
     {
-      year: z.number().describe('Election year (parliamentary: 1983, 1987, 1991, 1995, 1999, 2003, 2007, 2011, 2015, 2019, 2023).'),
-      party_id: z.string().optional().describe('Party code (e.g. "SDP", "KOK", "PS", "KESK", "VIHR", "VAS", "RKP", "KD"). Omit to get all parties.'),
-      area_id: z.string().optional().describe('Area code to filter to. Omit to get all areas. Format varies by level.'),
+      year: z.number().describe('Election year.'),
+      election_type: ELECTION_TYPE_PARAM,
+      area_id: z.string().optional().describe(
+        'Area code to filter to. Omit for all areas. ' +
+        'Parliamentary/municipal: 6-digit (e.g. "010091" for Helsinki kunta, "SSS" for national). ' +
+        'Regional: HV##-format (e.g. "HV01"). EU: 5-digit. Presidential: VP##.'
+      ),
       output_mode: z.enum(['data', 'analysis']).optional().describe('data = normalized rows, analysis = summary with methodology.'),
     },
-    async ({ year, party_id, area_id, output_mode }) => {
-      const tables = getElectionTables('parliamentary', year);
-      if (!tables?.party_by_kunta) {
-        return {
-          content: [{
-            type: 'text' as const,
-            text: JSON.stringify({ error: `No party data found for parliamentary election ${year}.` }),
-          }],
-        };
+    async ({ year, election_type, area_id, output_mode }) => {
+      const electionType: ElectionType = election_type ?? 'parliamentary';
+      try {
+        const { rows, tableId, cache_hit } = await loadPartyResults(year, area_id, electionType);
+        const source = { table_ids: [tableId], query_timestamp: new Date().toISOString(), cache_hit };
+        const mode = parseOutputMode(output_mode);
+        if (mode === 'analysis') return buildPartyAnalysis(rows, year, source);
+        return { content: [{ type: 'text' as const, text: JSON.stringify({ mode: 'data', rows, source }, null, 2) }] };
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return { content: [{ type: 'text' as const, text: JSON.stringify({ error: msg }) }] };
       }
-
-      const dbPath = getDatabasePath(tables);
-      const tableId = tables.party_by_kunta;
-      const metadata = await fetchTableMetadata(dbPath, tableId);
-
-      // Resolve party code → PxWeb code (e.g. "SDP" → "01")
-      const partyVar = metadata.variables.find((v) => v.code === 'Puolue');
-      let partyValues: string[];
-      if (party_id) {
-        const idx = partyVar?.valueTexts.findIndex(
-          (t) => t.toLowerCase() === party_id.toLowerCase() || partyVar?.values[partyVar.valueTexts.indexOf(t)] === party_id
-        );
-        const code = partyVar?.values.find((v, i) => partyVar.valueTexts[i]?.toUpperCase() === party_id.toUpperCase() || v === party_id);
-        partyValues = code ? [code] : [party_id];
-      } else {
-        partyValues = ['*'];
-      }
-
-      const query = {
-        query: [
-          {
-            code: 'Vuosi',
-            selection: { filter: 'item' as const, values: [String(year)] },
-          },
-          {
-            code: 'Sukupuoli',
-            selection: { filter: 'item' as const, values: ['SSS'] }, // total, no gender split
-          },
-          {
-            code: 'Puolue',
-            selection: partyValues[0] === '*'
-              ? { filter: 'all' as const, values: ['*'] }
-              : { filter: 'item' as const, values: partyValues },
-          },
-          {
-            code: 'Vaalipiiri ja kunta vaalivuonna',
-            selection: area_id
-              ? { filter: 'item' as const, values: [area_id] }
-              : { filter: 'all' as const, values: ['*'] },
-          },
-          {
-            code: 'Tiedot',
-            selection: { filter: 'item' as const, values: ['evaa_aanet', 'evaa_osuus_aanista'] },
-          },
-        ],
-        response: { format: 'json' as const },
-      };
-
-      const { value: response, cache_hit } = await withCache(
-        `data:${tableId}:${year}:${party_id ?? 'all'}:${area_id ?? 'all'}`,
-        () => pxwebClient.queryTable(dbPath, tableId, query)
-      );
-
-      const rows = normalizePartyByKunta(response, metadata, year);
-
-      const source = {
-        table_ids: [tableId],
-        query_timestamp: new Date().toISOString(),
-        cache_hit,
-      };
-
-      const mode = parseOutputMode(output_mode);
-
-      if (mode === 'analysis') {
-        return buildPartyAnalysis(rows, year, source);
-      }
-
-      return {
-        content: [{
-          type: 'text' as const,
-          text: JSON.stringify({ mode: 'data', rows, source }, null, 2),
-        }],
-      };
     }
   );
 
   // ── get_candidate_results ────────────────────────────────────────────────
   server.tool(
     'get_candidate_results',
-    'Returns candidate vote results from a parliamentary election, broken down by äänestysalue within a vaalipiiri. ' +
-    'Candidate data is stored per-vaalipiiri. To get national results, query each vaalipiiri separately or omit vaalipiiri to fetch all (slow: 13 API calls).',
+    'Returns candidate vote results for any Finnish election type. ' +
+    'Parliamentary/municipal: provide unit_key (vaalipiiri, e.g. "helsinki", "uusimaa"). ' +
+    'Regional: provide unit_key (hyvinvointialue, e.g. "pirkanmaa", "varsinais-suomi"). ' +
+    'EU/presidential: omit unit_key or pass "national" — single national table is used. ' +
+    'Presidential: use round=1 or round=2 to filter by round.',
     {
       year: z.number().describe('Election year.'),
-      vaalipiiri: z.string().optional().describe('Vaalipiiri to fetch (e.g. "helsinki", "uusimaa", "pirkanmaa"). Omit to fetch all vaalipiirit (slow: 13 API calls).'),
-      candidate_id: z.string().optional().describe('Candidate code to filter to (e.g. "01010169"). Omit to get all candidates.'),
-      area_id: z.string().optional().describe('Area code to filter to (VP##=vaalipiiri, KU###=kunta, full code=äänestysalue). Omit for all areas.'),
+      election_type: ELECTION_TYPE_PARAM,
+      unit_key: z.string().optional().describe(
+        'Geographic unit key. Parliamentary/municipal: vaalipiiri (e.g. "helsinki", "uusimaa", "pirkanmaa"). ' +
+        'Regional: hyvinvointialue (e.g. "varsinais-suomi", "pirkanmaa", "keski-uusimaa"). ' +
+        'EU/presidential: omit or pass "national".'
+      ),
+      candidate_id: z.string().optional().describe('Candidate code to filter to. Omit to get all candidates.'),
+      round: z.number().optional().describe('Presidential elections only: 1 = first round, 2 = second round. Omit for all rounds.'),
       output_mode: z.enum(['data', 'analysis']).optional().describe('data = normalized rows, analysis = summary.'),
     },
-    async ({ year, vaalipiiri, candidate_id, area_id, output_mode }) => {
-      const tables = getElectionTables('parliamentary', year);
-      if (!tables?.candidate_by_aanestysalue) {
-        return {
-          content: [{
-            type: 'text' as const,
-            text: JSON.stringify({ error: `No candidate data found for parliamentary election ${year}.` }),
-          }],
-        };
-      }
-
-      const dbPath = getDatabasePath(tables);
-      const districtTables = tables.candidate_by_aanestysalue;
-
-      // Determine which vaalipiirit to query
-      const tablesToQuery: Array<[string, string]> = vaalipiiri
-        ? [[vaalipiiri, districtTables[vaalipiiri]]]
-        : Object.entries(districtTables);
-
-      const missing = tablesToQuery.filter(([, id]) => !id).map(([name]) => name);
-      if (missing.length > 0) {
-        return {
-          content: [{
-            type: 'text' as const,
-            text: JSON.stringify({ error: `Unknown vaalipiiri(t): ${missing.join(', ')}. Valid: ${Object.keys(districtTables).join(', ')}` }),
-          }],
-        };
-      }
-
-      const allRows: ElectionRecord[] = [];
-      const tableIds: string[] = [];
-      let anyCache = true;
-
-      for (const [, tableId] of tablesToQuery) {
-        const metadata = await fetchTableMetadata(dbPath, tableId);
-
-        // Detect variable names — 2023 active and 2019 archive tables differ
-        const areaVarCode = metadata.variables.some((v) => v.code === 'Alue/Äänestysalue')
-          ? 'Alue/Äänestysalue'
-          : 'Äänestysalue';
-        const tiedotVarCode = metadata.variables.some((v) => v.code === 'Tiedot')
-          ? 'Tiedot'
-          : 'Äänestystiedot';
-        const tiedotVar = metadata.variables.find((v) => v.code === tiedotVarCode);
-        const votesCode = tiedotVar?.values.find(
-          (_, i) => (tiedotVar.valueTexts[i] ?? '').includes('Äänimäärä')
-        ) ?? 'evaa_aanet';
-        const shareCode = tiedotVar?.values.find(
-          (_, i) => (tiedotVar.valueTexts[i] ?? '').toLowerCase().includes('osuus')
-        ) ?? 'evaa_osuus_aanista';
-
-        type FilterItem = { code: string; selection: { filter: 'item' | 'all'; values: string[] } };
-        const filters: FilterItem[] = [];
-        if (metadata.variables.some((v) => v.code === 'Vuosi')) {
-          filters.push({ code: 'Vuosi', selection: { filter: 'item', values: [String(year)] } });
-        }
-        filters.push({
-          code: areaVarCode,
-          selection: area_id
-            ? { filter: 'item', values: [area_id] }
-            : { filter: 'all', values: ['*'] },
-        });
-        filters.push({
-          code: 'Ehdokas',
-          selection: candidate_id
-            ? { filter: 'item', values: [candidate_id] }
-            : { filter: 'all', values: ['*'] },
-        });
-        if (metadata.variables.some((v) => v.code === 'Valintatieto')) {
-          filters.push({ code: 'Valintatieto', selection: { filter: 'item', values: ['SSS'] } });
-        }
-        filters.push({ code: tiedotVarCode, selection: { filter: 'item', values: [votesCode, shareCode] } });
-
-        const query = { query: filters, response: { format: 'json' as const } };
-
-        const cacheKey = `data:${tableId}:${year}:${candidate_id ?? 'all'}:${area_id ?? 'all'}`;
-        const { value: response, cache_hit } = await withCache(cacheKey, () =>
-          pxwebClient.queryTable(dbPath, tableId, query)
+    async ({ year, election_type, unit_key, candidate_id, round, output_mode }) => {
+      const electionType: ElectionType = election_type ?? 'parliamentary';
+      try {
+        const { rows, tableId, cache_hit } = await loadCandidateResults(
+          year, unit_key, candidate_id, electionType, round
         );
-
-        allRows.push(...normalizeCandidateByAanestysalue(response, metadata, year));
-        tableIds.push(tableId);
-        anyCache = anyCache && cache_hit;
+        const source = { table_ids: [tableId], query_timestamp: new Date().toISOString(), cache_hit };
+        const mode = parseOutputMode(output_mode);
+        if (mode === 'analysis') return buildCandidateAnalysis(rows, year, source);
+        return { content: [{ type: 'text' as const, text: JSON.stringify({ mode: 'data', rows, source }, null, 2) }] };
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return { content: [{ type: 'text' as const, text: JSON.stringify({ error: msg }) }] };
       }
-
-      const source = {
-        table_ids: tableIds,
-        query_timestamp: new Date().toISOString(),
-        cache_hit: anyCache,
-      };
-
-      const mode = parseOutputMode(output_mode);
-
-      if (mode === 'analysis') {
-        return buildCandidateAnalysis(allRows, year, source);
-      }
-
-      return {
-        content: [{
-          type: 'text' as const,
-          text: JSON.stringify({ mode: 'data', rows: allRows, source }, null, 2),
-        }],
-      };
     }
   );
 
