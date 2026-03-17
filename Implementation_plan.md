@@ -282,7 +282,7 @@ Key findings that affect implementation — see `docs/api-notes.md` for full det
 
 ---
 
-## Phase 11: Election-Agnostic Architecture + All Missing Elections
+## Phase 11: Election-Agnostic Architecture + All Missing Elections ✅ COMPLETE
 
 **Goal:** The MCP covers all major Finnish elections from 2019 onwards (municipal, regional, EU, presidential) in addition to parliamentary. The architecture is refactored so adding a new election requires only a registry entry — no code changes.
 
@@ -380,14 +380,14 @@ Populate schemas for the existing 2023 and 2019 parliamentary entries.
 - candidate: investigate whether per-äänestysalue tables exist; if only kunta-level, note as caveat
 
 #### Tasks
-- [ ] Verify 2025 municipal candidate table variable names match schema (fetch metadata for `14v9`)
-- [ ] Verify 2021 archive candidate table structure
-- [ ] Register 2025 municipal with full schemas
-- [ ] Register 2021 municipal with available schemas
-- [ ] Test `get_party_results` municipal 2025 Helsinki
-- [ ] Test `get_candidate_results` municipal 2025 Helsinki candidate
-- [ ] Test `analyze_candidate_profile` municipal 2025
-- [ ] Test `compare_elections` KOK municipal 2021→2025
+- [x] Verify 2025 municipal candidate table variable names match schema (fetch metadata for `14v9`)
+- [x] Verify 2021 archive candidate table structure
+- [x] Register 2025 municipal with full schemas
+- [x] Register 2021 municipal with available schemas
+- [x] Test `get_party_results` municipal 2025 Helsinki
+- [x] Test `get_candidate_results` municipal 2025 Helsinki candidate
+- [x] Test `analyze_candidate_profile` municipal 2025
+- [x] Test `compare_elections` KOK municipal 2021→2025
 
 ---
 
@@ -413,14 +413,14 @@ Populate schemas for the existing 2023 and 2019 parliamentary entries.
 - candidate: investigate whether per-äänestysalue tables exist in archive
 
 #### Tasks
-- [ ] Define 21 hyvinvointialue key names (lowercase, hyphenated)
-- [ ] Fetch metadata for one 2025 regional candidate table to verify variable names
-- [ ] Register 2025 regional with full schemas
-- [ ] Register 2022 regional
-- [ ] Update tools to accept `hyvinvointialue` geographic unit parameter
-- [ ] Test `get_party_results` regional 2025
-- [ ] Test `get_candidate_results` regional 2025
-- [ ] Test `compare_elections` across 2022→2025 regional
+- [x] Define 21 hyvinvointialue key names (lowercase, hyphenated)
+- [x] Fetch metadata for one 2025 regional candidate table to verify variable names
+- [x] Register 2025 regional with full schemas
+- [x] Register 2022 regional
+- [x] Update tools to accept `hyvinvointialue` geographic unit parameter
+- [x] Test `get_party_results` regional 2025
+- [x] Test `get_candidate_results` regional 2025
+- [x] Test `compare_elections` across 2022→2025 regional
 
 ---
 
@@ -446,12 +446,12 @@ Populate schemas for the existing 2023 and 2019 parliamentary entries.
 - candidate: `430_euvaa_2019_tau_105`
 
 #### Tasks
-- [ ] Fetch metadata for `14gy` and `14gv` to confirm variable names
-- [ ] Register 2024 EU with schemas
-- [ ] Register 2019 EU with schemas
-- [ ] Test `get_party_results` EU national 2024
-- [ ] Test `get_candidate_results` EU 2024 (no area breakdown)
-- [ ] Test `compare_elections` EU 2019→2024
+- [x] Fetch metadata for `14gy` and `14gv` to confirm variable names
+- [x] Register 2024 EU with schemas
+- [x] Register 2019 EU with schemas
+- [x] Test `get_party_results` EU national 2024
+- [x] Test `get_candidate_results` EU 2024 (no area breakdown)
+- [x] Test `compare_elections` EU 2019→2024
 
 ---
 
@@ -475,25 +475,25 @@ Populate schemas for the existing 2023 and 2019 parliamentary entries.
 - multi-election candidate summary: `statfin_pvaa_pxt_14db` (1994–2024 by vaalipiiri)
 
 #### Tasks
-- [ ] Add `round?: number` to `ElectionRecord` in types.ts (if not already done in 11A)
-- [ ] Register 2024 presidential with schema
-- [ ] Add `round` parameter to `get_candidate_results` and `analyze_candidate_profile`
-- [ ] Test round 1 vs round 2 results for Stubb
-- [ ] Verify party-dependent tools return graceful N/A for presidential
+- [x] Add `round?: number` to `ElectionRecord` in types.ts (if not already done in 11A)
+- [x] Register 2024 presidential with schema
+- [x] Add `round` parameter to `get_candidate_results` and `analyze_candidate_profile`
+- [x] Test round 1 vs round 2 results for Stubb
+- [x] Verify party-dependent tools return graceful N/A for presidential
 
 ---
 
 ### Phase 11F: Integration + Documentation
 
 #### Tasks
-- [ ] Update `list_elections` to show all registered elections
-- [ ] Update system prompt data coverage section
-- [ ] Update `get_data_caveats` with new caveats:
+- [x] Update `list_elections` to show all registered elections
+- [x] Update system prompt data coverage section
+- [x] Update `get_data_caveats` with new caveats:
   - EU: no kunta-level candidate geography (national only)
   - Presidential: no party dimension, two rounds
   - Municipal 2021: candidate data may be kunta-level only (no äänestysalue)
   - Regional 2022: verify candidate data depth
-- [ ] Update `trace_result_lineage` for new election types
-- [ ] Update CLAUDE.md data coverage section
-- [ ] Full cross-election integration test (one query per new election type)
-- [ ] Mark Phase 11 complete in logbook
+- [x] Update `trace_result_lineage` for new election types
+- [x] Update CLAUDE.md data coverage section
+- [x] Full cross-election integration test (one query per new election type)
+- [x] Mark Phase 11 complete in logbook

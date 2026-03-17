@@ -321,3 +321,31 @@ Candidate results:
 Build: clean (tsc, no errors).
 
 ---
+
+## PHASE 11C–F COMPLETE: RETRIEVAL/ANALYTICS/AREA/STRATEGIC TOOLS WIRED TO ALL ELECTION TYPES — 2026-03-17 12:00:00
+
+**Changes:**
+- `src/tools/retrieval/index.ts`: Added `election_type` param to all tools. `get_party_results`, `get_area_results`, `get_election_results` delegate to `loadPartyResults`. `get_candidate_results` uses `loadCandidateResults` with `unit_key` (replaces `vaalipiiri`). `get_turnout` uses `getElectionTables(electionType, year)`. `computeRankings` rewritten to use loaders for both party and candidate branches; supports all election types. `get_rankings` and `get_top_n` pass `election_type`/`unit_key` through.
+- `src/tools/analytics/index.ts`: All 10 tools accept `election_type`. `vaalipiiri` → `unit_key`. `subnatLevel()` helper returns per-type finest area level. Unit-level detection for candidates is election-type-aware.
+- `src/tools/area/index.ts`: Same pattern. 5 tools updated. VP/HV row detection generalized.
+- `src/tools/strategic/index.ts`: Same pattern. 4 tools updated.
+- `src/tools/discovery/index.ts`: `list_elections` correctly reports `party_data_available`/`candidate_data_available` via fallback; added `hyvinvointialue` level for regional; `describe_election` uses fallback + `candidate_national`.
+- `src/data/loaders.ts`: `'SSS'`/`'national'` → `schema.national_code` translation (fixes EU party 400 bug — EU uses `'00000'`).
+
+**Live API test results (2026-03-17):**
+- PARTY parliamentary 2023 SSS: OK — 23 rows, 644555 votes
+- PARTY municipal 2021 national: OK — 20 rows, 433811 votes
+- PARTY municipal 2021 Helsinki 011091: OK — 15 rows, 48096 votes
+- PARTY regional 2022 SSS: OK — 20 rows, 359462 votes
+- PARTY eu_parliament 2024 SSS: OK — 14 rows, 453636 votes
+- PARTY presidential: No party table (expected — presidential is candidate-only)
+- CANDIDATE parliamentary 2023 helsinki: OK — 49517 rows
+- CANDIDATE eu_parliament 2024 national: OK — 232 rows
+- CANDIDATE presidential 2024 national: OK — 22869 rows
+- CANDIDATE regional 2025 pirkanmaa (single): OK — 188 rows, unit_code=HV08
+- Regional 2022 candidate: no tables registered (intentional — archive lacks per-äänestysalue tables)
+- Municipal/regional all-candidates: 403 (expected — cell count limit, single-candidate queries work)
+
+**Build:** clean (tsc, no errors).
+
+---

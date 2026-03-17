@@ -106,18 +106,20 @@ export function registerRetrievalTools(server: McpServer): void {
   // ── get_turnout ──────────────────────────────────────────────────────────
   server.tool(
     'get_turnout',
-    'Returns voter turnout statistics for a parliamentary election.',
+    'Returns voter turnout statistics for an election.',
     {
       year: z.number().describe('Election year.'),
+      election_type: ELECTION_TYPE_PARAM,
       area_id: z.string().optional().describe('Area code to filter to. Omit for all areas.'),
     },
-    async ({ year, area_id }) => {
-      const tables = getElectionTables('parliamentary', year);
+    async ({ year, election_type, area_id }) => {
+      const electionType: ElectionType = election_type ?? 'parliamentary';
+      const tables = getElectionTables(electionType, year);
       if (!tables?.turnout_by_aanestysalue) {
         return {
           content: [{
             type: 'text' as const,
-            text: JSON.stringify({ error: `No turnout data found for parliamentary election ${year}.` }),
+            text: JSON.stringify({ error: `No turnout data found for ${electionType} election ${year}.` }),
           }],
         };
       }
@@ -177,153 +179,94 @@ export function registerRetrievalTools(server: McpServer): void {
   // ── get_area_results ─────────────────────────────────────────────────────
   server.tool(
     'get_area_results',
-    'Returns all party results (and optionally candidate results) for a specific geographic area in an election.',
+    'Returns all party results for a specific geographic area. Optionally also fetches candidate results. Supports all election types.',
     {
       year: z.number().describe('Election year.'),
-      area_id: z.string().describe('Area code. For 13sw party table: 6-digit format e.g. "010091" (Helsinki kunta), "010000" (VP01 vaalipiiri), "SSS" (national). For candidate tables: "KU091" (kunta), "VP01" (vaalipiiri).'),
-      include_candidates: z.boolean().optional().describe('Also fetch candidate results for this area (only works for parliamentary 2023, requires vaalipiiri parameter).'),
-      vaalipiiri: z.string().optional().describe('Required when include_candidates=true. Which vaalipiiri table to query (e.g. "helsinki").'),
+      election_type: ELECTION_TYPE_PARAM,
+      area_id: z.string().describe(
+        'Area code. Parliamentary/municipal: 6-digit (e.g. "010091" Helsinki kunta, "010000" VP01 vaalipiiri, "SSS" national). ' +
+        'Regional: HV##-format. EU: 5-digit. Municipal: e.g. "011091".'
+      ),
+      include_candidates: z.boolean().optional().describe('Also fetch candidate results. Requires unit_key.'),
+      unit_key: z.string().optional().describe('Unit key for candidate lookup (vaalipiiri/hyvinvointialue). Required when include_candidates=true.'),
       output_mode: z.enum(['data', 'analysis']).optional(),
     },
-    async ({ year, area_id, include_candidates, vaalipiiri, output_mode }) => {
-      const tables = getElectionTables('parliamentary', year);
-      if (!tables?.party_by_kunta) {
-        return { content: [{ type: 'text' as const, text: JSON.stringify({ error: `No data for parliamentary ${year}.` }) }] };
-      }
+    async ({ year, election_type, area_id, include_candidates, unit_key, output_mode }) => {
+      const electionType: ElectionType = election_type ?? 'parliamentary';
+      try {
+        const { rows: partyRows, tableId, cache_hit } = await loadPartyResults(year, area_id, electionType);
+        const allRows: ElectionRecord[] = [...partyRows];
+        const tableIds = [tableId];
 
-      const dbPath = getDatabasePath(tables);
-      const tableId = tables.party_by_kunta;
-      const metadata = await fetchTableMetadata(dbPath, tableId);
-
-      const partyQuery = {
-        query: [
-          { code: 'Vuosi', selection: { filter: 'item' as const, values: [String(year)] } },
-          { code: 'Sukupuoli', selection: { filter: 'item' as const, values: ['SSS'] } },
-          { code: 'Puolue', selection: { filter: 'all' as const, values: ['*'] } },
-          { code: 'Vaalipiiri ja kunta vaalivuonna', selection: { filter: 'item' as const, values: [area_id] } },
-          { code: 'Tiedot', selection: { filter: 'item' as const, values: ['evaa_aanet', 'evaa_osuus_aanista'] } },
-        ],
-        response: { format: 'json' as const },
-      };
-
-      const { value: partyResponse, cache_hit } = await withCache(
-        `data:${tableId}:${year}:all:${area_id}`,
-        () => pxwebClient.queryTable(dbPath, tableId, partyQuery)
-      );
-
-      const partyRows = normalizePartyByKunta(partyResponse, metadata, year);
-      const allRows: ElectionRecord[] = [...partyRows];
-      const tableIds = [tableId];
-
-      if (include_candidates && vaalipiiri && tables.candidate_by_aanestysalue) {
-        const candTableId = tables.candidate_by_aanestysalue[vaalipiiri];
-        if (candTableId) {
-          const candMeta = await fetchTableMetadata(dbPath, candTableId);
-          const candQuery = {
-            query: [
-              { code: 'Vuosi', selection: { filter: 'item' as const, values: [String(year)] } },
-              { code: 'Alue/Äänestysalue', selection: { filter: 'item' as const, values: [area_id.startsWith('KU') ? area_id : `KU${area_id}`] } },
-              { code: 'Ehdokas', selection: { filter: 'all' as const, values: ['*'] } },
-              { code: 'Valintatieto', selection: { filter: 'item' as const, values: ['SSS'] } },
-              { code: 'Tiedot', selection: { filter: 'item' as const, values: ['evaa_aanet', 'evaa_osuus_aanista'] } },
-            ],
-            response: { format: 'json' as const },
-          };
-          const { value: candResponse } = await withCache(
-            `data:${candTableId}:${year}:all:${area_id}`,
-            () => pxwebClient.queryTable(dbPath, candTableId, candQuery)
-          );
-          allRows.push(...normalizeCandidateByAanestysalue(candResponse, candMeta, year));
-          tableIds.push(candTableId);
+        if (include_candidates && unit_key) {
+          try {
+            const { rows: candRows, tableId: candId } = await loadCandidateResults(year, unit_key, undefined, electionType);
+            allRows.push(...candRows.filter(r => r.area_id === area_id || r.area_id.startsWith(area_id)));
+            tableIds.push(candId);
+          } catch (_) { /* candidates optional */ }
         }
+
+        const source = { table_ids: tableIds, query_timestamp: new Date().toISOString(), cache_hit };
+        const mode = parseOutputMode(output_mode);
+
+        if (mode === 'analysis') {
+          const parties = partyRows
+            .filter(r => r.party_id !== 'SSS')
+            .sort((a, b) => b.votes - a.votes)
+            .map((r, i) => ({ rank: i + 1, party_id: r.party_id, party_name: r.party_name, votes: r.votes, vote_share: r.vote_share }));
+          return { content: [{ type: 'text' as const, text: JSON.stringify({
+            mode: 'analysis',
+            summary: { year, election_type: electionType, area_id, total_parties: parties.length },
+            tables: { party_rankings: parties },
+            method: { description: 'All parties in area, sorted by votes descending.', source_table: tableId },
+            source,
+          }, null, 2) }] };
+        }
+
+        return { content: [{ type: 'text' as const, text: JSON.stringify({ mode: 'data', rows: allRows, source }, null, 2) }] };
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return { content: [{ type: 'text' as const, text: JSON.stringify({ error: msg }) }] };
       }
-
-      const source = { table_ids: tableIds, query_timestamp: new Date().toISOString(), cache_hit };
-      const mode = parseOutputMode(output_mode);
-
-      if (mode === 'analysis') {
-        const parties = partyRows
-          .filter(r => r.party_id !== 'SSS')
-          .sort((a, b) => b.votes - a.votes)
-          .map((r, i) => ({ rank: i + 1, party_id: r.party_id, party_name: r.party_name, votes: r.votes, vote_share: r.vote_share }));
-
-        return {
-          content: [{
-            type: 'text' as const,
-            text: JSON.stringify({
-              mode: 'analysis',
-              summary: { year, area_id, total_parties: parties.length },
-              tables: { party_rankings: parties },
-              method: { description: 'All parties in area, sorted by votes descending.', source_table: tableId },
-              source,
-            }, null, 2),
-          }],
-        };
-      }
-
-      return { content: [{ type: 'text' as const, text: JSON.stringify({ mode: 'data', rows: allRows, source }, null, 2) }] };
     }
   );
 
   // ── get_election_results ─────────────────────────────────────────────────
   server.tool(
     'get_election_results',
-    'Returns the full party result dataset for an election, optionally filtered to a specific area level. Use this for broad overviews; use get_party_results or get_area_results for targeted queries.',
+    'Returns the full party result dataset for an election, optionally filtered to a specific area level. Supports all election types.',
     {
       year: z.number().describe('Election year.'),
-      area_level: z.enum(['kunta', 'vaalipiiri', 'koko_suomi']).optional().describe('Filter results to this area level. Omit for all levels.'),
+      election_type: ELECTION_TYPE_PARAM,
+      area_level: z.enum(['kunta', 'vaalipiiri', 'hyvinvointialue', 'koko_suomi']).optional().describe('Filter results to this area level. Omit for all levels.'),
       output_mode: z.enum(['data', 'analysis']).optional(),
     },
-    async ({ year, area_level, output_mode }) => {
-      const tables = getElectionTables('parliamentary', year);
-      if (!tables?.party_by_kunta) {
-        return { content: [{ type: 'text' as const, text: JSON.stringify({ error: `No data for parliamentary ${year}.` }) }] };
+    async ({ year, election_type, area_level, output_mode }) => {
+      const electionType: ElectionType = election_type ?? 'parliamentary';
+      try {
+        const { rows: allRows, tableId, cache_hit } = await loadPartyResults(year, undefined, electionType);
+        const rows = area_level ? allRows.filter(r => r.area_level === area_level) : allRows;
+        const source = { table_ids: [tableId], query_timestamp: new Date().toISOString(), cache_hit };
+        const mode = parseOutputMode(output_mode);
+        if (mode === 'analysis') return buildPartyAnalysis(rows, year, source);
+        return { content: [{ type: 'text' as const, text: JSON.stringify({ mode: 'data', rows, source }, null, 2) }] };
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return { content: [{ type: 'text' as const, text: JSON.stringify({ error: msg }) }] };
       }
-
-      const dbPath = getDatabasePath(tables);
-      const tableId = tables.party_by_kunta;
-      const metadata = await fetchTableMetadata(dbPath, tableId);
-
-      const query = {
-        query: [
-          { code: 'Vuosi', selection: { filter: 'item' as const, values: [String(year)] } },
-          { code: 'Sukupuoli', selection: { filter: 'item' as const, values: ['SSS'] } },
-          { code: 'Puolue', selection: { filter: 'all' as const, values: ['*'] } },
-          { code: 'Vaalipiiri ja kunta vaalivuonna', selection: { filter: 'all' as const, values: ['*'] } },
-          { code: 'Tiedot', selection: { filter: 'item' as const, values: ['evaa_aanet', 'evaa_osuus_aanista'] } },
-        ],
-        response: { format: 'json' as const },
-      };
-
-      const { value: response, cache_hit } = await withCache(
-        `data:${tableId}:${year}:all:all`,
-        () => pxwebClient.queryTable(dbPath, tableId, query)
-      );
-
-      let rows = normalizePartyByKunta(response, metadata, year);
-
-      if (area_level) {
-        rows = rows.filter(r => r.area_level === area_level);
-      }
-
-      const source = { table_ids: [tableId], query_timestamp: new Date().toISOString(), cache_hit };
-      const mode = parseOutputMode(output_mode);
-
-      if (mode === 'analysis') return buildPartyAnalysis(rows, year, source);
-
-      return { content: [{ type: 'text' as const, text: JSON.stringify({ mode: 'data', rows, source }, null, 2) }] };
     }
   );
 
   // ── get_rankings ─────────────────────────────────────────────────────────
   server.tool(
     'get_rankings',
-    'Returns ranked list of parties or candidates within a defined scope (area and election). Ranks by total votes descending.',
+    'Returns ranked list of parties or candidates within a defined scope. Supports all election types.',
     {
       year: z.number().describe('Election year.'),
+      election_type: ELECTION_TYPE_PARAM,
       subject: z.enum(['parties', 'candidates']).describe('Rank parties or candidates.'),
-      area_id: z.string().optional().describe('Area code to rank within. Omit for national ranking. For parties use 13sw format (e.g. "010091"). For candidates, specify vaalipiiri instead.'),
-      vaalipiiri: z.string().optional().describe('For candidate rankings: which vaalipiiri to query (e.g. "helsinki"). Required when subject=candidates.'),
+      area_id: z.string().optional().describe('Area code to rank parties within. Omit for national. Use SSS/national for national party rankings.'),
+      unit_key: z.string().optional().describe('For candidate rankings: vaalipiiri/hyvinvointialue key. Required unless EU/presidential.'),
       limit: z.number().optional().describe('Return only the top N results. Omit for all.'),
     },
     async (args) => computeRankings(args)
@@ -332,16 +275,17 @@ export function registerRetrievalTools(server: McpServer): void {
   // ── get_top_n ────────────────────────────────────────────────────────────
   server.tool(
     'get_top_n',
-    'Convenience tool: returns the top N parties or candidates by votes within a scope. Equivalent to get_rankings with a limit.',
+    'Convenience tool: returns the top N parties or candidates by votes within a scope.',
     {
       year: z.number().describe('Election year.'),
+      election_type: ELECTION_TYPE_PARAM,
       subject: z.enum(['parties', 'candidates']).describe('Rank parties or candidates.'),
       n: z.number().describe('Number of top results to return.'),
       area_id: z.string().optional().describe('Area code to rank within.'),
-      vaalipiiri: z.string().optional().describe('Required when subject=candidates.'),
+      unit_key: z.string().optional().describe('For candidate rankings: vaalipiiri/hyvinvointialue key.'),
     },
-    async ({ year, subject, n, area_id, vaalipiiri }) =>
-      computeRankings({ year, subject, area_id, vaalipiiri, limit: n })
+    async ({ year, election_type, subject, n, area_id, unit_key }) =>
+      computeRankings({ year, election_type, subject, area_id, unit_key, limit: n })
   );
 
 }
@@ -349,111 +293,55 @@ export function registerRetrievalTools(server: McpServer): void {
 // ─── computeRankings (shared by get_rankings and get_top_n) ─────────────────
 
 async function computeRankings({
-  year, subject, area_id, vaalipiiri, limit,
+  year, election_type, subject, area_id, unit_key, limit,
 }: {
   year: number;
+  election_type?: string;
   subject: 'parties' | 'candidates';
   area_id?: string;
-  vaalipiiri?: string;
+  unit_key?: string;
   limit?: number;
 }) {
-  const tables = getElectionTables('parliamentary', year);
-  if (!tables) {
-    return { content: [{ type: 'text' as const, text: JSON.stringify({ error: `No data for parliamentary ${year}.` }) }] };
-  }
-
-  const dbPath = getDatabasePath(tables);
+  const electionType: ElectionType = (election_type as ElectionType) ?? 'parliamentary';
   type RankedRow = { rank: number; votes: number; vote_share?: number; [k: string]: unknown };
-  let ranked: RankedRow[] = [];
-  const tableIds: string[] = [];
 
-  if (subject === 'parties') {
-    const tableId = tables.party_by_kunta!;
-    tableIds.push(tableId);
-    const metadata = await fetchTableMetadata(dbPath, tableId);
-    const query = {
-      query: [
-        { code: 'Vuosi', selection: { filter: 'item' as const, values: [String(year)] } },
-        { code: 'Sukupuoli', selection: { filter: 'item' as const, values: ['SSS'] } },
-        { code: 'Puolue', selection: { filter: 'all' as const, values: ['*'] } },
-        {
-          code: 'Vaalipiiri ja kunta vaalivuonna',
-          selection: area_id
-            ? { filter: 'item' as const, values: [area_id] }
-            : { filter: 'item' as const, values: ['SSS'] },
-        },
-        { code: 'Tiedot', selection: { filter: 'item' as const, values: ['evaa_aanet', 'evaa_osuus_aanista'] } },
-      ],
-      response: { format: 'json' as const },
-    };
-    const { value: response } = await withCache(
-      `data:${tableId}:${year}:all:${area_id ?? 'SSS'}`,
-      () => pxwebClient.queryTable(dbPath, tableId, query)
-    );
-    ranked = normalizePartyByKunta(response, metadata, year)
-      .filter(r => r.party_id !== 'SSS')
-      .sort((a, b) => b.votes - a.votes)
-      .map((r, i) => ({ rank: i + 1, party_id: r.party_id, party_name: r.party_name, votes: r.votes, vote_share: r.vote_share }));
-
-  } else {
-    if (!vaalipiiri || !tables.candidate_by_aanestysalue) {
-      return { content: [{ type: 'text' as const, text: JSON.stringify({ error: 'vaalipiiri is required for candidate rankings.' }) }] };
-    }
-    const tableId = tables.candidate_by_aanestysalue[vaalipiiri];
-    if (!tableId) {
-      return { content: [{ type: 'text' as const, text: JSON.stringify({ error: `Unknown vaalipiiri: ${vaalipiiri}` }) }] };
-    }
-    tableIds.push(tableId);
-    const metadata = await fetchTableMetadata(dbPath, tableId);
-
-    // Use VP code from metadata if no area_id given (vaalipiiri total)
-    const areaVar = metadata.variables.find(v => v.code === 'Alue/Äänestysalue');
-    const vpCode = areaVar?.values.find(v => v.startsWith('VP')) ?? '';
-    const resolvedArea = area_id ?? vpCode;
-
-    const query = {
-      query: [
-        { code: 'Vuosi', selection: { filter: 'item' as const, values: [String(year)] } },
-        { code: 'Alue/Äänestysalue', selection: { filter: 'item' as const, values: [resolvedArea] } },
-        { code: 'Ehdokas', selection: { filter: 'all' as const, values: ['*'] } },
-        { code: 'Valintatieto', selection: { filter: 'item' as const, values: ['SSS'] } },
-        { code: 'Tiedot', selection: { filter: 'item' as const, values: ['evaa_aanet', 'evaa_osuus_aanista'] } },
-      ],
-      response: { format: 'json' as const },
-    };
-    const { value: response } = await withCache(
-      `data:${tableId}:${year}:all:${resolvedArea}`,
-      () => pxwebClient.queryTable(dbPath, tableId, query)
-    );
-
-    const targetLevel = resolvedArea.startsWith('KU') ? 'kunta' : resolvedArea.startsWith('VP') ? 'vaalipiiri' : 'aanestysalue';
-    ranked = normalizeCandidateByAanestysalue(response, metadata, year)
-      .filter(r => r.area_level === targetLevel)
-      .sort((a, b) => b.votes - a.votes)
-      .map((r, i) => ({
-        rank: i + 1,
-        candidate_id: r.candidate_id,
-        candidate_name: r.candidate_name,
-        party_id: r.party_id,
-        votes: r.votes,
-        vote_share: r.vote_share,
-      }));
-  }
-
-  if (limit) ranked = ranked.slice(0, limit);
-
-  return {
-    content: [{
-      type: 'text' as const,
-      text: JSON.stringify({
-        subject,
-        year,
-        scope: area_id ?? (subject === 'candidates' ? vaalipiiri : 'national'),
+  try {
+    if (subject === 'parties') {
+      const { rows, tableId } = await loadPartyResults(year, area_id ?? 'SSS', electionType);
+      let ranked: RankedRow[] = rows
+        .filter(r => r.party_id !== 'SSS' && r.party_id !== '00')
+        .sort((a, b) => b.votes - a.votes)
+        .map((r, i) => ({ rank: i + 1, party_id: r.party_id, party_name: r.party_name, votes: r.votes, vote_share: r.vote_share }));
+      if (limit) ranked = ranked.slice(0, limit);
+      return { content: [{ type: 'text' as const, text: JSON.stringify({
+        subject, year, election_type: electionType,
+        scope: area_id ?? 'national',
         rankings: ranked,
-        source: { table_ids: tableIds, query_timestamp: new Date().toISOString() },
-      }, null, 2),
-    }],
-  };
+        source: { table_ids: [tableId], query_timestamp: new Date().toISOString() },
+      }, null, 2) }] };
+
+    } else {
+      const { rows, tableId, unit_code } = await loadCandidateResults(year, unit_key, undefined, electionType);
+      // Rank at unit-level aggregate (vaalipiiri / hyvinvointialue / koko_suomi)
+      const unitAreaLevel = electionType === 'regional' ? 'hyvinvointialue'
+        : (electionType === 'eu_parliament' || electionType === 'presidential') ? 'koko_suomi'
+        : 'vaalipiiri';
+      let ranked: RankedRow[] = rows
+        .filter(r => r.area_level === unitAreaLevel)
+        .sort((a, b) => b.votes - a.votes)
+        .map((r, i) => ({ rank: i + 1, candidate_id: r.candidate_id, candidate_name: r.candidate_name, party_id: r.party_id, votes: r.votes, vote_share: r.vote_share }));
+      if (limit) ranked = ranked.slice(0, limit);
+      return { content: [{ type: 'text' as const, text: JSON.stringify({
+        subject, year, election_type: electionType,
+        scope: unit_key ?? unit_code ?? 'national',
+        rankings: ranked,
+        source: { table_ids: [tableId], query_timestamp: new Date().toISOString() },
+      }, null, 2) }] };
+    }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { content: [{ type: 'text' as const, text: JSON.stringify({ error: msg }) }] };
+  }
 }
 
 // ─── Analysis mode builders ─────────────────────────────────────────────────
