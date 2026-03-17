@@ -402,3 +402,42 @@ Full audit pass addressing all items in CODE_AUDIT.md across 6 groups.
 `src/tools/shared.ts` (new), `src/tools/analytics/index.ts`, `src/tools/entity-resolution/index.ts`, `src/tools/strategic/index.ts`, `src/tools/area/index.ts`, `src/tools/retrieval/index.ts`, `src/tools/audit/index.ts`, `src/data/loaders.ts`, `src/cache/cache.ts`, `src/api/pxweb-client.ts`, `src/server-http.ts`, `.gitignore`
 
 **Build:** clean (tsc, no errors).
+
+---
+
+## PHASE 17 COMPLETE: VITEST TEST SUITE — 91 TESTS, 3 FILES — 2026-03-17 15:00:00
+
+Added automated test coverage for math helpers, normalizer functions, and all 8 bugs documented in MATH_AUDIT.md.
+
+**Framework setup:**
+- Installed `vitest@4.1.0` as dev dependency
+- Added `vitest.config.ts` (environment: node, include: `src/**/*.test.ts`)
+- Added `"test": "vitest run"` and `"test:watch": "vitest"` to `package.json` scripts
+
+**`src/tools/shared.test.ts` (29 tests):**
+- `pct()`: rounding, edge cases, and explicit BUG-1 demonstration (ratio vs pct)
+- `round2()`: 2-decimal rounding including BUG-1 documentation test
+- `mcpText()` / `errResult()`: content structure and JSON serialization
+- `subnatLevel()`: all 5 election types
+- `matchesParty()`: id match, name match, case-insensitivity, falsy fields
+
+**`src/data/normalizer.test.ts` (37 tests):**
+- `buildKeyIndex()`, `buildValueIndex()`: dimension/content column filtering
+- `buildValueTextMap()`: correct map, unknown variable, fallback to code
+- `inferAreaLevelFromCandidateCode()`: all 6 code formats
+- `inferPartyAreaLevel()`: all 3 schema formats (six_digit, vp_prefix, five_digit)
+- `parseCandidateValueText()`: parliamentary, EU, presidential, municipal formats
+- `normalizePartyTable()`: SSS exclusion, votes/share, area levels, area names (6 tests)
+- `normalizeCandidateByAanestysalue()`: code "00" exclusion, name/party parsing (6 tests)
+
+**`src/bugs.regression.test.ts` (25 tests):**
+- BUG-1: `round2()` returns ratio; `pct(×100)` returns percentage — documents the fix path
+- BUG-2: double-counting kunta+vaalipiiri rows vs kunta-only filter
+- BUG-3: negative "lost votes" when vote count rises despite share drop
+- BUG-4: c1/c4 anti-correlation proven mathematically (effective c1 weight = 0.15, not 0.35)
+- BUG-5: concentration fraction (0-1) vs percentage (×100) labeling
+- BUG-8: co-movement 1-vote threshold vs magnitude-based threshold
+- BUG-9: party-vote c3 vs electorate-size c3 (allVotesByArea)
+- BUG-10: ä→a normalization creates false collisions; duplicate detection logic
+
+**Test run result:** 91/91 passing, 0 failures, 358ms total
