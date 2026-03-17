@@ -441,3 +441,33 @@ Added automated test coverage for math helpers, normalizer functions, and all 8 
 - BUG-10: ä→a normalization creates false collisions; duplicate detection logic
 
 **Test run result:** 91/91 passing, 0 failures, 358ms total
+
+---
+
+## PHASE 12 COMPLETE: PER-IP RATE LIMITING IN server-http.ts — 2026-03-17 15:30:00
+
+Added application-level per-IP sliding-window rate limiter to `src/server-http.ts`.
+
+**Design:**
+- 30 requests / 60-second sliding window per IP (configurable via env vars `RATE_LIMIT_REQUESTS`, `RATE_LIMIT_WINDOW_MS`)
+- `Map<ip, number[]>` of recent timestamps per IP address
+- `checkRateLimit(ip)`: filters to last 60s, rejects with 429 if ≥ 30, otherwise pushes new timestamp
+- `getClientIp(req)`: reads `X-Forwarded-For` header first (handles nginx/Cloudflare reverse proxy), falls back to `socket.remoteAddress`
+- 429 response: JSON body `{ error, message, retry_after_seconds }` + `Retry-After` header
+- Stale-entry eviction via `setInterval` every 5 min (prevents unbounded Map growth)
+- Request log now includes `ip=<addr>` field
+- Startup log shows effective rate limit
+
+**Tests added (`src/rate-limiter.test.ts` — 8 tests, all passing):**
+- Allows up to limit, rejects on limit+1
+- Resets after window elapses
+- Independent per-IP tracking
+- Sliding window expiry
+- Eviction logic for stale and active IPs
+
+**Infrastructure note:**
+- nginx snippet: `limit_req_zone $binary_remote_addr zone=mcp:10m rate=30r/m; limit_req zone=mcp burst=10 nodelay;`
+- Cloudflare: rate limit rule on `/mcp` at 30 req/min
+- App-level limiter provides defense-in-depth regardless of infra choice
+
+**Build + test:** clean (tsc), 99/99 tests passing

@@ -500,7 +500,7 @@ Populate schemas for the existing 2023 and 2019 parliamentary entries.
 
 ---
 
-## Phase 12: HTTP Deployment — Per-IP Rate Limiting
+## Phase 12: HTTP Deployment — Per-IP Rate Limiting ✅ COMPLETE
 
 **Goal:** Protect the public HTTP endpoint from upstream API budget exhaustion by a single abusive client, while keeping the service completely open and frictionless for legitimate election candidate users.
 
@@ -517,23 +517,29 @@ Populate schemas for the existing 2023 and 2019 parliamentary entries.
 
 **30 requests / 60 seconds per IP** — generous enough for any realistic campaign session, restrictive enough to prevent runaway loops.
 
-### Tasks
+### Implementation (application-level, in `server-http.ts`)
 
-- [ ] Choose deployment path: nginx reverse proxy, Cloudflare, or Azure API Management
-- [ ] Configure rate limit rule: 30 req/min per client IP, burst of 10 allowed
-- [ ] Write the 429 response body (JSON, user-friendly message with admin contact):
-  ```json
-  {
-    "error": "rate_limit_exceeded",
-    "message": "You have made too many requests. Please wait a moment and try again. For campaign use with higher limits, contact [admin email].",
-    "retry_after_seconds": 60
-  }
-  ```
-- [ ] Verify the 429 JSON is returned (not an HTML nginx error page)
-- [ ] Test: confirm a normal Claude Desktop session of 20 calls completes without hitting the limit
-- [ ] Test: confirm a tight loop of 50 rapid calls triggers the 429 correctly
-- [ ] Document the limit in `README.md` (deployment section)
-- [ ] Logbook entry
+- [x] Sliding-window rate limiter: `Map<ip, number[]>` of recent timestamps per IP
+- [x] `checkRateLimit(ip)`: filters timestamps to last 60s, rejects if ≥ 30, else pushes new timestamp
+- [x] `getClientIp(req)`: honours `X-Forwarded-For` for nginx/Cloudflare proxying
+- [x] 429 JSON response body: `{ error, message, retry_after_seconds }` + `Retry-After` header
+- [x] Stale-IP eviction via `setInterval` every 5 min (prevents unbounded Map growth)
+- [x] Configurable via env vars: `RATE_LIMIT_REQUESTS` (default 30), `RATE_LIMIT_WINDOW_MS` (default 60000)
+- [x] Startup log: `Rate limit: 30 req / 60s per IP`
+- [x] Request log includes `ip=<addr>` field
+
+### Tests (`src/rate-limiter.test.ts` — 8 tests)
+- [x] Allows requests up to the limit
+- [x] Rejects (limit+1)th request within window
+- [x] Allows requests again after window elapses
+- [x] Different IPs tracked independently
+- [x] Sliding window: oldest timestamp expires correctly
+- [x] `evict()` removes stale IPs / keeps active IPs
+
+### Notes
+- Infrastructure-level rate limiting (nginx/Cloudflare) can be added in front for additional protection without changing application code — the app-level limiter provides defense-in-depth.
+- For nginx: `limit_req_zone $binary_remote_addr zone=mcp:10m rate=30r/m; limit_req zone=mcp burst=10 nodelay;`
+- For Cloudflare: rate limit rule on the MCP endpoint URL with 30 req/min threshold.
 
 ---
 
