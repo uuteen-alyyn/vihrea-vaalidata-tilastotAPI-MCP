@@ -1,7 +1,18 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { loadPartyResults, loadCandidateResults } from '../../data/loaders.js';
-import type { ElectionRecord } from '../../data/types.js';
+import type { ElectionRecord, ElectionType, AreaLevel } from '../../data/types.js';
+
+const ELECTION_TYPE_PARAM = z.enum(['parliamentary', 'municipal', 'eu_parliament', 'presidential', 'regional'])
+  .optional()
+  .describe('Election type. Defaults to "parliamentary".');
+
+/** Returns the finest sub-national area level with kunta-like breakdown for each election type. */
+function subnatLevel(type: ElectionType): AreaLevel {
+  if (type === 'regional') return 'hyvinvointialue';
+  if (type === 'eu_parliament' || type === 'presidential') return 'vaalipiiri';
+  return 'kunta';
+}
 
 // ─── Analytics helpers ────────────────────────────────────────────────────────
 
@@ -71,41 +82,46 @@ export function registerAnalyticsTools(server: McpServer): void {
   // ── analyze_candidate_profile ────────────────────────────────────────────
   server.tool(
     'analyze_candidate_profile',
-    'Computes a comprehensive performance profile for a single candidate: total votes, vote share, overall rank in vaalipiiri, rank within party, share of party vote, strongest and weakest äänestysalueet, and geographic concentration index.',
+    'Computes a comprehensive performance profile for a single candidate: total votes, vote share, overall rank in unit, rank within party, share of party vote, strongest and weakest areas, and geographic concentration index.',
     {
       year: z.number().describe('Election year (e.g. 2023).'),
+      election_type: ELECTION_TYPE_PARAM,
       candidate_id: z.string().describe('Candidate code (e.g. "01010176"). Use resolve_candidate if you only have a name.'),
-      vaalipiiri: z.string().describe('Vaalipiiri key (e.g. "helsinki"). Required — candidate data is stored per vaalipiiri.'),
+      unit_key: z.string().optional().describe('Geographic unit key. Parliamentary/municipal: vaalipiiri (e.g. "helsinki"). Regional: hyvinvointialue (e.g. "pirkanmaa"). EU/presidential: omit.'),
     },
-    async ({ year, candidate_id, vaalipiiri }) => {
+    async ({ year, election_type, candidate_id, unit_key }) => {
+      const electionType: ElectionType = election_type ?? 'parliamentary';
       let allRows: ElectionRecord[];
       let tableId: string;
-      let vpCode: string;
       let cache_hit: boolean;
       try {
-        const result = await loadCandidateResults(year, vaalipiiri);
+        const result = await loadCandidateResults(year, unit_key, undefined, electionType);
         allRows = result.rows;
         tableId = result.tableId;
-        vpCode = result.vaalipiiri_code;
         cache_hit = result.cache_hit;
       } catch (err) {
         return errResult(`Failed to load candidate data: ${String(err)}`);
       }
+      const unitLabel = unit_key ?? 'national';
 
       // The candidate's own rows across all area levels
       const candidateRows = allRows.filter((r) => r.candidate_id === candidate_id);
       if (candidateRows.length === 0) {
-        return errResult(`Candidate ${candidate_id} not found in vaalipiiri ${vaalipiiri} ${year}.`);
+        return errResult(`Candidate ${candidate_id} not found in ${unitLabel} ${year}.`);
       }
 
-      // Vaalipiiri-level total for this candidate
-      const vpRow = candidateRows.find((r) => r.area_level === 'vaalipiiri');
+      // Unit-level total for this candidate (VP## row for parliamentary, HV## for regional, SSS for EU/presidential)
+      const unitAreaLevel: AreaLevel = electionType === 'regional' ? 'hyvinvointialue'
+        : (electionType === 'eu_parliament' || electionType === 'presidential') ? 'koko_suomi'
+        : 'vaalipiiri';
+      const vpRow = candidateRows.find((r) => r.area_level === unitAreaLevel)
+        ?? candidateRows.find((r) => r.area_level === 'vaalipiiri');
       const totalVotes = vpRow?.votes ?? candidateRows.filter((r) => r.area_level === 'aanestysalue').reduce((s, r) => s + r.votes, 0);
       const candidateName = candidateRows[0]!.candidate_name ?? candidate_id;
       const partyId = candidateRows[0]!.party_id ?? '';
 
-      // All candidates at vaalipiiri level → overall rank
-      const allVpRows = allRows.filter((r) => r.area_level === 'vaalipiiri' && r.candidate_id);
+      // All candidates at unit level → overall rank
+      const allVpRows = allRows.filter((r) => r.area_level === unitAreaLevel && r.candidate_id);
       const overallRank = allVpRows
         .sort((a, b) => b.votes - a.votes)
         .findIndex((r) => r.candidate_id === candidate_id) + 1;
@@ -138,10 +154,11 @@ export function registerAnalyticsTools(server: McpServer): void {
         candidate_name: candidateName,
         party: partyId,
         year,
-        vaalipiiri,
+        election_type: electionType,
+        unit_key: unitLabel,
         total_votes: totalVotes,
         vote_share_pct: vpRow?.vote_share ? pct(vpRow.vote_share) : null,
-        rank_overall_in_vaalipiiri: overallRank || null,
+        rank_overall_in_unit: overallRank || null,
         rank_within_party: rankWithinParty || null,
         total_party_candidates: partyVpRows.length,
         share_of_party_vote: shareOfPartyVote,
@@ -160,17 +177,20 @@ export function registerAnalyticsTools(server: McpServer): void {
   // ── analyze_party_profile ────────────────────────────────────────────────
   server.tool(
     'analyze_party_profile',
-    'Computes a performance profile for a party in an election: national totals, vote share, strongest and weakest municipalities, and geographic spread.',
+    'Computes a performance profile for a party in an election: national totals, vote share, strongest and weakest areas, and geographic spread. Supports all election types.',
     {
-      year: z.number().describe('Election year (1983–2023 for parliamentary).'),
+      year: z.number().describe('Election year.'),
+      election_type: ELECTION_TYPE_PARAM,
       party_id: z.string().describe('Party abbreviation or code (e.g. "KOK", "SDP"). Use resolve_party if needed.'),
     },
-    async ({ year, party_id }) => {
+    async ({ year, election_type, party_id }) => {
+      const electionType: ElectionType = election_type ?? 'parliamentary';
+      const areaLvl = subnatLevel(electionType);
       let rows: ElectionRecord[];
       let tableId: string;
       let cache_hit: boolean;
       try {
-        const result = await loadPartyResults(year);
+        const result = await loadPartyResults(year, undefined, electionType);
         rows = result.rows;
         tableId = result.tableId;
         cache_hit = result.cache_hit;
@@ -178,53 +198,52 @@ export function registerAnalyticsTools(server: McpServer): void {
         return errResult(`Failed to load party data: ${String(err)}`);
       }
 
-      // Resolve party_id to the code used in the data (try both direct and by text match)
       const partyRows = rows.filter((r) => matchesParty(r, party_id));
       if (partyRows.length === 0) {
-        return errResult(`Party "${party_id}" not found in parliamentary ${year}. Use resolve_party to find the correct party_id.`);
+        return errResult(`Party "${party_id}" not found in ${electionType} ${year}. Use resolve_party to find the correct party_id.`);
       }
 
       const partyName = partyRows[0]!.party_name ?? party_id;
       const nationalRow = partyRows.find((r) => r.area_level === 'koko_suomi');
-      const kuntaRows = partyRows.filter((r) => r.area_level === 'kunta');
+      const subnatRows = partyRows.filter((r) => r.area_level === areaLvl);
 
-      const nationalVotes = nationalRow?.votes ?? kuntaRows.reduce((s, r) => s + r.votes, 0);
+      const nationalVotes = nationalRow?.votes ?? subnatRows.reduce((s, r) => s + r.votes, 0);
       const nationalShare = nationalRow?.vote_share;
 
-      // National total votes for context
       const allNationalRows = rows.filter((r) => r.area_level === 'koko_suomi');
       const totalNationalVotes = allNationalRows.reduce((s, r) => s + r.votes, 0);
 
-      const strongest = topN(kuntaRows, 10).map((r) => ({
+      const strongest = topN(subnatRows, 10).map((r) => ({
         area_id: r.area_id,
         area_name: r.area_name,
         votes: r.votes,
         vote_share_pct: r.vote_share ? pct(r.vote_share) : null,
       }));
 
-      const weakest = bottomN(kuntaRows.filter((r) => r.votes > 0), 5).map((r) => ({
+      const weakest = bottomN(subnatRows.filter((r) => r.votes > 0), 5).map((r) => ({
         area_id: r.area_id,
         area_name: r.area_name,
         votes: r.votes,
         vote_share_pct: r.vote_share ? pct(r.vote_share) : null,
       }));
 
-      const concentration = concentrationMetrics(kuntaRows.map((r) => r.votes));
+      const concentration = concentrationMetrics(subnatRows.map((r) => r.votes));
 
       return mcpText({
         party_id,
         party_name: partyName,
         year,
+        election_type: electionType,
         national_votes: nationalVotes,
         national_vote_share_pct: nationalShare ? pct(nationalShare) : null,
         total_national_votes_cast: totalNationalVotes,
-        n_municipalities: kuntaRows.length,
-        n_municipalities_with_votes: kuntaRows.filter((r) => r.votes > 0).length,
-        strongest_municipalities: strongest,
-        weakest_municipalities: weakest,
+        [`n_${areaLvl}s`]: subnatRows.length,
+        [`n_${areaLvl}s_with_votes`]: subnatRows.filter((r) => r.votes > 0).length,
+        [`strongest_${areaLvl}s`]: strongest,
+        [`weakest_${areaLvl}s`]: weakest,
         geographic_concentration: concentration,
         method: {
-          description: 'National total from koko_suomi row in 13sw. Strongest/weakest based on kunta-level rows.',
+          description: `National total from koko_suomi row. Strongest/weakest based on ${areaLvl}-level rows.`,
           source_table: tableId,
           cache_hit,
         },
@@ -235,18 +254,20 @@ export function registerAnalyticsTools(server: McpServer): void {
   // ── compare_candidates ───────────────────────────────────────────────────
   server.tool(
     'compare_candidates',
-    'Side-by-side vote comparison for two or more candidates in the same vaalipiiri and election. Returns votes, overall rank, party, and strongest areas for each.',
+    'Side-by-side vote comparison for two or more candidates in the same election unit. Returns votes, overall rank, party, and strongest areas for each.',
     {
       year: z.number().describe('Election year.'),
+      election_type: ELECTION_TYPE_PARAM,
       candidate_ids: z.array(z.string()).min(2).max(10).describe('List of candidate_id values to compare (2–10). Use resolve_candidate to find IDs.'),
-      vaalipiiri: z.string().describe('Vaalipiiri key (e.g. "helsinki"). All candidates must be in the same vaalipiiri.'),
+      unit_key: z.string().optional().describe('Vaalipiiri (parliamentary/municipal), hyvinvointialue (regional), or omit for EU/presidential.'),
     },
-    async ({ year, candidate_ids, vaalipiiri }) => {
+    async ({ year, election_type, candidate_ids, unit_key }) => {
+      const electionType: ElectionType = election_type ?? 'parliamentary';
       let allRows: ElectionRecord[];
       let tableId: string;
       let cache_hit: boolean;
       try {
-        const result = await loadCandidateResults(year, vaalipiiri);
+        const result = await loadCandidateResults(year, unit_key, undefined, electionType);
         allRows = result.rows;
         tableId = result.tableId;
         cache_hit = result.cache_hit;
@@ -254,7 +275,10 @@ export function registerAnalyticsTools(server: McpServer): void {
         return errResult(`Failed to load candidate data: ${String(err)}`);
       }
 
-      const allVpRows = allRows.filter((r) => r.area_level === 'vaalipiiri' && r.candidate_id)
+      const unitAreaLevel: AreaLevel = electionType === 'regional' ? 'hyvinvointialue'
+        : (electionType === 'eu_parliament' || electionType === 'presidential') ? 'koko_suomi'
+        : 'vaalipiiri';
+      const allVpRows = allRows.filter((r) => r.area_level === unitAreaLevel && r.candidate_id)
         .sort((a, b) => b.votes - a.votes);
 
       const comparison = candidate_ids.map((cid) => {
@@ -271,17 +295,18 @@ export function registerAnalyticsTools(server: McpServer): void {
           party: vpRow.party_id,
           votes: vpRow.votes,
           vote_share_pct: vpRow.vote_share ? pct(vpRow.vote_share) : null,
-          rank_in_vaalipiiri: rank,
+          rank_in_unit: rank,
           top_3_areas: top3,
         };
       });
 
       return mcpText({
         year,
-        vaalipiiri,
+        election_type: electionType,
+        unit_key: unit_key ?? 'national',
         comparison,
         method: {
-          description: 'Votes and ranks from vaalipiiri-level aggregate rows. Top areas from äänestysalue rows.',
+          description: `Votes and ranks from ${unitAreaLevel}-level aggregate rows. Top areas from äänestysalue rows.`,
           source_table: tableId,
           cache_hit,
         },
@@ -292,18 +317,20 @@ export function registerAnalyticsTools(server: McpServer): void {
   // ── compare_parties ──────────────────────────────────────────────────────
   server.tool(
     'compare_parties',
-    'Side-by-side vote comparison for two or more parties in an election. Returns national votes, vote share, and rank for each. Optionally filter to a specific area.',
+    'Side-by-side vote comparison for two or more parties in an election. Returns national votes, vote share, and rank for each. Supports all election types.',
     {
       year: z.number().describe('Election year.'),
+      election_type: ELECTION_TYPE_PARAM,
       party_ids: z.array(z.string()).min(2).max(15).describe('List of party_id values to compare (2–15). Use resolve_party to find IDs.'),
-      area_id: z.string().optional().describe('Restrict comparison to a specific area (e.g. "010091" for Helsinki kunta, "SSS" for national). Defaults to national.'),
+      area_id: z.string().optional().describe('Restrict comparison to a specific area. Defaults to national.'),
     },
-    async ({ year, party_ids, area_id }) => {
+    async ({ year, election_type, party_ids, area_id }) => {
+      const electionType: ElectionType = election_type ?? 'parliamentary';
       let rows: ElectionRecord[];
       let tableId: string;
       let cache_hit: boolean;
       try {
-        const result = await loadPartyResults(year, area_id ?? 'SSS');
+        const result = await loadPartyResults(year, area_id ?? 'SSS', electionType);
         rows = result.rows;
         tableId = result.tableId;
         cache_hit = result.cache_hit;
@@ -329,10 +356,11 @@ export function registerAnalyticsTools(server: McpServer): void {
 
       return mcpText({
         year,
+        election_type: electionType,
         area_id: area_id ?? 'SSS',
         comparison,
         method: {
-          description: 'Party votes from 13sw. Rank is relative to all parties in the same area.',
+          description: 'Party votes from party table. Rank is relative to all parties in the same area.',
           source_table: tableId,
           cache_hit,
         },
@@ -343,13 +371,15 @@ export function registerAnalyticsTools(server: McpServer): void {
   // ── compare_elections ────────────────────────────────────────────────────
   server.tool(
     'compare_elections',
-    'Tracks a party across two or more parliamentary elections: vote total, vote share, and rank at each election, plus change metrics between consecutive elections.',
+    'Tracks a party across multiple elections of the same type: vote total, vote share, and rank at each election, plus change metrics between consecutive elections.',
     {
       party_id: z.string().describe('Party abbreviation or code (e.g. "KOK", "SDP").'),
-      years: z.array(z.number()).min(2).max(10).describe('Election years to compare (e.g. [2015, 2019, 2023]). Parliamentary years available: 1983, 1987, 1991, 1995, 1999, 2003, 2007, 2011, 2015, 2019, 2023.'),
+      election_type: ELECTION_TYPE_PARAM,
+      years: z.array(z.number()).min(2).max(10).describe('Election years to compare (e.g. [2015, 2019, 2023]).'),
       area_id: z.string().optional().describe('Area code to compare within. Defaults to national (SSS).'),
     },
-    async ({ party_id, years, area_id }) => {
+    async ({ party_id, election_type, years, area_id }) => {
+      const electionType: ElectionType = election_type ?? 'parliamentary';
       const effectiveArea = area_id ?? 'SSS';
       const yearResults: Array<{
         year: number;
@@ -362,7 +392,7 @@ export function registerAnalyticsTools(server: McpServer): void {
 
       for (const year of years.sort((a, b) => a - b)) {
         try {
-          const { rows, tableId } = await loadPartyResults(year, effectiveArea);
+          const { rows, tableId } = await loadPartyResults(year, effectiveArea, electionType);
           if (!tableIds.includes(tableId)) tableIds.push(tableId);
           const row = rows.find((r) => matchesParty(r, party_id));
           const rank = [...rows].sort((a, b) => b.votes - a.votes).findIndex((r) => r.party_id === row?.party_id) + 1;
@@ -393,11 +423,12 @@ export function registerAnalyticsTools(server: McpServer): void {
 
       return mcpText({
         party_id,
+        election_type: electionType,
         area_id: effectiveArea,
         by_year: yearResults,
         changes,
         method: {
-          description: 'Votes and shares from 13sw party-by-kunta table. Rank is relative to all parties in the same area per year. vote_share_change_pp = percentage point change. rank_change: positive = moved up (better).',
+          description: 'Votes and shares from party table. Rank is relative to all parties in the same area per year. vote_share_change_pp = percentage point change. rank_change: positive = moved up (better).',
           source_tables: tableIds,
         },
       });
@@ -407,20 +438,23 @@ export function registerAnalyticsTools(server: McpServer): void {
   // ── find_area_overperformance ────────────────────────────────────────────
   server.tool(
     'find_area_overperformance',
-    'Finds areas where a party or candidate performs above their baseline. Baseline for parties = national vote share in that election. Baseline for candidates = party\'s vaalipiiri-level vote share. Returns areas ranked by overperformance magnitude.',
+    'Finds areas where a party or candidate performs above their baseline. Baseline for parties = national vote share. Baseline for candidates = unit-level vote share. Returns areas ranked by overperformance magnitude.',
     {
       year: z.number().describe('Election year.'),
+      election_type: ELECTION_TYPE_PARAM,
       subject_type: z.enum(['party', 'candidate']).describe('Whether to analyse a party or a candidate.'),
       subject_id: z.string().describe('Party abbreviation (e.g. "KOK") or candidate_id (e.g. "01010176").'),
-      vaalipiiri: z.string().optional().describe('Required when subject_type=candidate. Also used to limit party analysis to one vaalipiiri if provided.'),
-      min_votes: z.number().optional().describe('Minimum votes in an area to include in results (filters out tiny areas). Defaults to 10.'),
+      unit_key: z.string().optional().describe('Required when subject_type=candidate (vaalipiiri/hyvinvointialue key). Omit for EU/presidential.'),
+      min_votes: z.number().optional().describe('Minimum votes in an area to include in results. Defaults to 10.'),
     },
-    async ({ year, subject_type, subject_id, vaalipiiri, min_votes = 10 }) => {
+    async ({ year, election_type, subject_type, subject_id, unit_key, min_votes = 10 }) => {
+      const electionType: ElectionType = election_type ?? 'parliamentary';
+      const areaLvl = subnatLevel(electionType);
       if (subject_type === 'party') {
         let rows: ElectionRecord[];
         let tableId: string;
         try {
-          const result = await loadPartyResults(year);
+          const result = await loadPartyResults(year, undefined, electionType);
           rows = result.rows;
           tableId = result.tableId;
         } catch (err) {
@@ -431,8 +465,8 @@ export function registerAnalyticsTools(server: McpServer): void {
         const baseline = nationalRow?.vote_share;
         if (!baseline) return errResult(`No national vote share found for party "${subject_id}" in ${year}.`);
 
-        const kuntaRows = rows.filter((r) => matchesParty(r, subject_id) && r.area_level === 'kunta' && r.votes >= min_votes);
-        const overperf = kuntaRows
+        const subnatRows = rows.filter((r) => matchesParty(r, subject_id) && r.area_level === areaLvl && r.votes >= min_votes);
+        const overperf = subnatRows
           .filter((r) => r.vote_share !== undefined)
           .map((r) => ({
             area_id: r.area_id,
@@ -448,31 +482,35 @@ export function registerAnalyticsTools(server: McpServer): void {
           subject_type: 'party',
           subject_id,
           year,
+          election_type: electionType,
           baseline_pct: pct(baseline),
           baseline_description: 'National vote share',
           overperforming_areas: overperf.filter((a) => a.overperformance_pp > 0),
           method: {
-            description: 'Baseline = party national vote share (koko_suomi row in 13sw). Overperformance = area_vote_share - baseline. Kunta level only.',
+            description: `Baseline = party national vote share. Overperformance = area_vote_share - baseline. ${areaLvl} level only.`,
             source_table: tableId,
           },
         });
 
       } else {
-        if (!vaalipiiri) return errResult('vaalipiiri is required for candidate analysis.');
         let allRows: ElectionRecord[];
         let tableId: string;
         try {
-          const result = await loadCandidateResults(year, vaalipiiri);
+          const result = await loadCandidateResults(year, unit_key, undefined, electionType);
           allRows = result.rows;
           tableId = result.tableId;
         } catch (err) {
           return errResult(String(err));
         }
 
-        const vpRow = allRows.find((r) => r.candidate_id === subject_id && r.area_level === 'vaalipiiri');
-        if (!vpRow) return errResult(`Candidate ${subject_id} not found in vaalipiiri ${vaalipiiri}.`);
+        const unitAreaLevel: AreaLevel = electionType === 'regional' ? 'hyvinvointialue'
+          : (electionType === 'eu_parliament' || electionType === 'presidential') ? 'koko_suomi'
+          : 'vaalipiiri';
+        const vpRow = allRows.find((r) => r.candidate_id === subject_id && r.area_level === unitAreaLevel)
+          ?? allRows.find((r) => r.candidate_id === subject_id && r.area_level === 'vaalipiiri');
+        if (!vpRow) return errResult(`Candidate ${subject_id} not found${unit_key ? ` in ${unit_key}` : ''}.`);
         const baseline = vpRow.vote_share;
-        if (!baseline) return errResult(`No vaalipiiri-level vote share for candidate ${subject_id}.`);
+        if (!baseline) return errResult(`No unit-level vote share for candidate ${subject_id}.`);
 
         const aalueRows = allRows.filter((r) => r.candidate_id === subject_id && r.area_level === 'aanestysalue' && r.votes >= min_votes);
         const overperf = aalueRows
@@ -492,12 +530,13 @@ export function registerAnalyticsTools(server: McpServer): void {
           subject_id,
           candidate_name: vpRow.candidate_name,
           year,
-          vaalipiiri,
+          election_type: electionType,
+          unit_key: unit_key ?? 'national',
           baseline_pct: pct(baseline),
-          baseline_description: 'Candidate vote share at vaalipiiri level',
+          baseline_description: 'Candidate vote share at unit level',
           overperforming_areas: overperf.filter((a) => a.overperformance_pp > 0),
           method: {
-            description: 'Baseline = candidate vote share in vaalipiiri (VP## row). Overperformance = äänestysalue_share - baseline.',
+            description: 'Baseline = candidate vote share in unit aggregate row. Overperformance = äänestysalue_share - baseline.',
             source_table: tableId,
           },
         });
@@ -508,20 +547,23 @@ export function registerAnalyticsTools(server: McpServer): void {
   // ── find_area_underperformance ───────────────────────────────────────────
   server.tool(
     'find_area_underperformance',
-    'Finds areas where a party or candidate performs below their baseline. Inverse of find_area_overperformance. See that tool for baseline methodology.',
+    'Finds areas where a party or candidate performs below their baseline. Inverse of find_area_overperformance.',
     {
       year: z.number().describe('Election year.'),
+      election_type: ELECTION_TYPE_PARAM,
       subject_type: z.enum(['party', 'candidate']).describe('Whether to analyse a party or a candidate.'),
       subject_id: z.string().describe('Party abbreviation (e.g. "KOK") or candidate_id (e.g. "01010176").'),
-      vaalipiiri: z.string().optional().describe('Required when subject_type=candidate.'),
+      unit_key: z.string().optional().describe('Required when subject_type=candidate (vaalipiiri/hyvinvointialue key). Omit for EU/presidential.'),
       min_votes: z.number().optional().describe('Minimum votes in area to include. Defaults to 10.'),
     },
-    async ({ year, subject_type, subject_id, vaalipiiri, min_votes = 10 }) => {
+    async ({ year, election_type, subject_type, subject_id, unit_key, min_votes = 10 }) => {
+      const electionType: ElectionType = election_type ?? 'parliamentary';
+      const areaLvl = subnatLevel(electionType);
       if (subject_type === 'party') {
         let rows: ElectionRecord[];
         let tableId: string;
         try {
-          const result = await loadPartyResults(year);
+          const result = await loadPartyResults(year, undefined, electionType);
           rows = result.rows;
           tableId = result.tableId;
         } catch (err) {
@@ -532,8 +574,8 @@ export function registerAnalyticsTools(server: McpServer): void {
         const baseline = nationalRow?.vote_share;
         if (!baseline) return errResult(`No national vote share found for party "${subject_id}" in ${year}.`);
 
-        const kuntaRows = rows.filter((r) => matchesParty(r, subject_id) && r.area_level === 'kunta' && r.votes >= min_votes);
-        const underperf = kuntaRows
+        const subnatRows = rows.filter((r) => matchesParty(r, subject_id) && r.area_level === areaLvl && r.votes >= min_votes);
+        const underperf = subnatRows
           .filter((r) => r.vote_share !== undefined && r.vote_share < baseline)
           .map((r) => ({
             area_id: r.area_id,
@@ -549,31 +591,35 @@ export function registerAnalyticsTools(server: McpServer): void {
           subject_type: 'party',
           subject_id,
           year,
+          election_type: electionType,
           baseline_pct: pct(baseline),
           baseline_description: 'National vote share',
           underperforming_areas: underperf,
           method: {
-            description: 'Baseline = party national vote share. Underperformance = baseline - area_vote_share.',
+            description: `Baseline = party national vote share. Underperformance = baseline - area_vote_share. ${areaLvl} level.`,
             source_table: tableId,
           },
         });
 
       } else {
-        if (!vaalipiiri) return errResult('vaalipiiri is required for candidate analysis.');
         let allRows: ElectionRecord[];
         let tableId: string;
         try {
-          const result = await loadCandidateResults(year, vaalipiiri);
+          const result = await loadCandidateResults(year, unit_key, undefined, electionType);
           allRows = result.rows;
           tableId = result.tableId;
         } catch (err) {
           return errResult(String(err));
         }
 
-        const vpRow = allRows.find((r) => r.candidate_id === subject_id && r.area_level === 'vaalipiiri');
-        if (!vpRow) return errResult(`Candidate ${subject_id} not found in vaalipiiri ${vaalipiiri}.`);
+        const unitAreaLevel: AreaLevel = electionType === 'regional' ? 'hyvinvointialue'
+          : (electionType === 'eu_parliament' || electionType === 'presidential') ? 'koko_suomi'
+          : 'vaalipiiri';
+        const vpRow = allRows.find((r) => r.candidate_id === subject_id && r.area_level === unitAreaLevel)
+          ?? allRows.find((r) => r.candidate_id === subject_id && r.area_level === 'vaalipiiri');
+        if (!vpRow) return errResult(`Candidate ${subject_id} not found${unit_key ? ` in ${unit_key}` : ''}.`);
         const baseline = vpRow.vote_share;
-        if (!baseline) return errResult(`No vaalipiiri-level vote share for candidate ${subject_id}.`);
+        if (!baseline) return errResult(`No unit-level vote share for candidate ${subject_id}.`);
 
         const aalueRows = allRows.filter((r) => r.candidate_id === subject_id && r.area_level === 'aanestysalue' && r.votes >= min_votes);
         const underperf = aalueRows
@@ -593,12 +639,13 @@ export function registerAnalyticsTools(server: McpServer): void {
           subject_id,
           candidate_name: vpRow.candidate_name,
           year,
-          vaalipiiri,
+          election_type: electionType,
+          unit_key: unit_key ?? 'national',
           baseline_pct: pct(baseline),
-          baseline_description: 'Candidate vote share at vaalipiiri level',
+          baseline_description: 'Candidate vote share at unit level',
           underperforming_areas: underperf,
           method: {
-            description: 'Baseline = candidate vote share in vaalipiiri. Underperformance = baseline - äänestysalue_share.',
+            description: 'Baseline = candidate vote share in unit aggregate row. Underperformance = baseline - äänestysalue_share.',
             source_table: tableId,
           },
         });
@@ -609,62 +656,64 @@ export function registerAnalyticsTools(server: McpServer): void {
   // ── analyze_geographic_concentration ────────────────────────────────────
   server.tool(
     'analyze_geographic_concentration',
-    'Measures how geographically concentrated a candidate\'s or party\'s vote is. Returns top-N area dependence metrics (fraction of total votes held by top 1/3/5/10 areas). A score close to 1 means nearly all votes come from few areas.',
+    'Measures how geographically concentrated a candidate\'s or party\'s vote is. Returns top-N area dependence metrics. A score close to 1 means nearly all votes come from few areas.',
     {
       year: z.number().describe('Election year.'),
+      election_type: ELECTION_TYPE_PARAM,
       subject_type: z.enum(['party', 'candidate']).describe('Whether to analyse a party or a candidate.'),
       subject_id: z.string().describe('Party abbreviation (e.g. "KOK") or candidate_id.'),
-      vaalipiiri: z.string().optional().describe('Required when subject_type=candidate. Optional for party (limits to one vaalipiiri if provided).'),
+      unit_key: z.string().optional().describe('Required when subject_type=candidate (vaalipiiri/hyvinvointialue key). Omit for EU/presidential.'),
     },
-    async ({ year, subject_type, subject_id, vaalipiiri }) => {
+    async ({ year, election_type, subject_type, subject_id, unit_key }) => {
+      const electionType: ElectionType = election_type ?? 'parliamentary';
+      const areaLvl = subnatLevel(electionType);
       if (subject_type === 'party') {
         let rows: ElectionRecord[];
         let tableId: string;
         try {
-          const result = await loadPartyResults(year);
+          const result = await loadPartyResults(year, undefined, electionType);
           rows = result.rows;
           tableId = result.tableId;
         } catch (err) {
           return errResult(String(err));
         }
-        const kuntaRows = rows.filter((r) => matchesParty(r, subject_id) && r.area_level === 'kunta');
-        if (kuntaRows.length === 0) return errResult(`Party "${subject_id}" not found in ${year}.`);
-        const conc = concentrationMetrics(kuntaRows.map((r) => r.votes));
-        const top10 = topN(kuntaRows, 10).map((r) => ({ area_name: r.area_name, votes: r.votes }));
+        const subnatRows = rows.filter((r) => matchesParty(r, subject_id) && r.area_level === areaLvl);
+        if (subnatRows.length === 0) return errResult(`Party "${subject_id}" not found in ${electionType} ${year}.`);
+        const conc = concentrationMetrics(subnatRows.map((r) => r.votes));
+        const top10 = topN(subnatRows, 10).map((r) => ({ area_name: r.area_name, votes: r.votes }));
 
         return mcpText({
-          subject_type: 'party', subject_id, year,
+          subject_type: 'party', subject_id, year, election_type: electionType,
           concentration: conc,
-          top_10_municipalities: top10,
+          [`top_10_${areaLvl}s`]: top10,
           interpretation: {
-            top1_share: `${pct(conc.top1_share * 100)}% of votes come from the single strongest municipality`,
-            top3_share: `${pct(conc.top3_share * 100)}% of votes come from the top 3 municipalities`,
-            top10_share: `${pct(conc.top10_share * 100)}% of votes come from the top 10 municipalities`,
+            top1_share: `${pct(conc.top1_share * 100)}% of votes come from the single strongest ${areaLvl}`,
+            top3_share: `${pct(conc.top3_share * 100)}% of votes come from the top 3 ${areaLvl}s`,
+            top10_share: `${pct(conc.top10_share * 100)}% of votes come from the top 10 ${areaLvl}s`,
           },
-          method: { description: 'Top-N share concentration using kunta-level rows from 13sw.', source_table: tableId },
+          method: { description: `Top-N share concentration using ${areaLvl}-level rows.`, source_table: tableId },
         });
 
       } else {
-        if (!vaalipiiri) return errResult('vaalipiiri is required for candidate concentration analysis.');
         let allRows: ElectionRecord[];
         let tableId: string;
         try {
-          const result = await loadCandidateResults(year, vaalipiiri);
+          const result = await loadCandidateResults(year, unit_key, undefined, electionType);
           allRows = result.rows;
           tableId = result.tableId;
         } catch (err) {
           return errResult(String(err));
         }
         const aalueRows = allRows.filter((r) => r.candidate_id === subject_id && r.area_level === 'aanestysalue');
-        if (aalueRows.length === 0) return errResult(`Candidate ${subject_id} not found in vaalipiiri ${vaalipiiri}.`);
-        const vpRow = allRows.find((r) => r.candidate_id === subject_id && r.area_level === 'vaalipiiri');
+        if (aalueRows.length === 0) return errResult(`Candidate ${subject_id} not found${unit_key ? ` in ${unit_key}` : ''}.`);
+        const vpRow = allRows.find((r) => r.candidate_id === subject_id && (r.area_level === 'vaalipiiri' || r.area_level === 'hyvinvointialue' || r.area_level === 'koko_suomi'));
         const conc = concentrationMetrics(aalueRows.map((r) => r.votes));
         const top10 = topN(aalueRows, 10).map((r) => ({ area_name: r.area_name, votes: r.votes }));
 
         return mcpText({
           subject_type: 'candidate', subject_id,
           candidate_name: vpRow?.candidate_name,
-          year, vaalipiiri,
+          year, election_type: electionType, unit_key: unit_key ?? 'national',
           concentration: conc,
           top_10_aanestysalueet: top10,
           interpretation: {
@@ -681,18 +730,20 @@ export function registerAnalyticsTools(server: McpServer): void {
   // ── analyze_within_party_position ────────────────────────────────────────
   server.tool(
     'analyze_within_party_position',
-    'Analyses a candidate\'s position within their party: rank among party candidates, share of party vote, votes above/below adjacent candidates, and distance to the last elected vs. first unelected seat.',
+    'Analyses a candidate\'s position within their party: rank among party candidates, share of party vote, votes above/below adjacent candidates.',
     {
       year: z.number().describe('Election year.'),
+      election_type: ELECTION_TYPE_PARAM,
       candidate_id: z.string().describe('Candidate code. Use resolve_candidate if you only have a name.'),
-      vaalipiiri: z.string().describe('Vaalipiiri key (e.g. "helsinki").'),
+      unit_key: z.string().optional().describe('Vaalipiiri (parliamentary/municipal), hyvinvointialue (regional), or omit for EU/presidential.'),
     },
-    async ({ year, candidate_id, vaalipiiri }) => {
+    async ({ year, election_type, candidate_id, unit_key }) => {
+      const electionType: ElectionType = election_type ?? 'parliamentary';
       let allRows: ElectionRecord[];
       let tableId: string;
       let cache_hit: boolean;
       try {
-        const result = await loadCandidateResults(year, vaalipiiri);
+        const result = await loadCandidateResults(year, unit_key, undefined, electionType);
         allRows = result.rows;
         tableId = result.tableId;
         cache_hit = result.cache_hit;
@@ -700,11 +751,14 @@ export function registerAnalyticsTools(server: McpServer): void {
         return errResult(String(err));
       }
 
-      const vpRows = allRows.filter((r) => r.area_level === 'vaalipiiri' && r.candidate_id)
+      const unitAreaLevel: AreaLevel = electionType === 'regional' ? 'hyvinvointialue'
+        : (electionType === 'eu_parliament' || electionType === 'presidential') ? 'koko_suomi'
+        : 'vaalipiiri';
+      const vpRows = allRows.filter((r) => r.area_level === unitAreaLevel && r.candidate_id)
         .sort((a, b) => b.votes - a.votes);
 
       const targetRow = vpRows.find((r) => r.candidate_id === candidate_id);
-      if (!targetRow) return errResult(`Candidate ${candidate_id} not found in vaalipiiri ${vaalipiiri}.`);
+      if (!targetRow) return errResult(`Candidate ${candidate_id} not found${unit_key ? ` in ${unit_key}` : ''}.`);
 
       const partyId = targetRow.party_id;
       const partyRows = vpRows.filter((r) => r.party_id === partyId).sort((a, b) => b.votes - a.votes);
@@ -727,7 +781,8 @@ export function registerAnalyticsTools(server: McpServer): void {
         candidate_name: targetRow.candidate_name,
         party: partyId,
         year,
-        vaalipiiri,
+        election_type: electionType,
+        unit_key: unit_key ?? 'national',
         votes: targetRow.votes,
         rank_within_party: rankWithinParty,
         total_party_candidates: partyRows.length,
@@ -750,14 +805,17 @@ export function registerAnalyticsTools(server: McpServer): void {
   // ── analyze_vote_distribution ────────────────────────────────────────────
   server.tool(
     'analyze_vote_distribution',
-    'Analyses how a party\'s or candidate\'s votes are distributed across geographic areas: mean, median, standard deviation, min, max, and a histogram. Useful for understanding whether support is evenly spread or clustered.',
+    'Analyses how a party\'s or candidate\'s votes are distributed across geographic areas: mean, median, standard deviation, min, max, and a histogram.',
     {
       year: z.number().describe('Election year.'),
+      election_type: ELECTION_TYPE_PARAM,
       subject_type: z.enum(['party', 'candidate']).describe('Whether to analyse a party or a candidate.'),
       subject_id: z.string().describe('Party abbreviation or candidate_id.'),
-      vaalipiiri: z.string().optional().describe('Required when subject_type=candidate.'),
+      unit_key: z.string().optional().describe('Required when subject_type=candidate (vaalipiiri/hyvinvointialue key). Omit for EU/presidential.'),
     },
-    async ({ year, subject_type, subject_id, vaalipiiri }) => {
+    async ({ year, election_type, subject_type, subject_id, unit_key }) => {
+      const electionType: ElectionType = election_type ?? 'parliamentary';
+      const areaLvl = subnatLevel(electionType);
       let voteCounts: number[];
       let areaLevel: string;
       let tableId: string;
@@ -765,28 +823,27 @@ export function registerAnalyticsTools(server: McpServer): void {
       if (subject_type === 'party') {
         let rows: ElectionRecord[];
         try {
-          const result = await loadPartyResults(year);
+          const result = await loadPartyResults(year, undefined, electionType);
           rows = result.rows;
           tableId = result.tableId;
         } catch (err) {
           return errResult(String(err));
         }
-        const kuntaRows = rows.filter((r) => matchesParty(r, subject_id) && r.area_level === 'kunta');
-        if (kuntaRows.length === 0) return errResult(`Party "${subject_id}" not found in ${year}.`);
-        voteCounts = kuntaRows.map((r) => r.votes);
-        areaLevel = 'kunta';
+        const subnatRows = rows.filter((r) => matchesParty(r, subject_id) && r.area_level === areaLvl);
+        if (subnatRows.length === 0) return errResult(`Party "${subject_id}" not found in ${electionType} ${year}.`);
+        voteCounts = subnatRows.map((r) => r.votes);
+        areaLevel = areaLvl;
       } else {
-        if (!vaalipiiri) return errResult('vaalipiiri is required for candidate analysis.');
         let allRows: ElectionRecord[];
         try {
-          const result = await loadCandidateResults(year, vaalipiiri);
+          const result = await loadCandidateResults(year, unit_key, undefined, electionType);
           allRows = result.rows;
           tableId = result.tableId;
         } catch (err) {
           return errResult(String(err));
         }
         const aalueRows = allRows.filter((r) => r.candidate_id === subject_id && r.area_level === 'aanestysalue');
-        if (aalueRows.length === 0) return errResult(`Candidate ${subject_id} not found.`);
+        if (aalueRows.length === 0) return errResult(`Candidate ${subject_id} not found${unit_key ? ` in ${unit_key}` : ''}.`);
         voteCounts = aalueRows.map((r) => r.votes);
         areaLevel = 'aanestysalue';
       }
