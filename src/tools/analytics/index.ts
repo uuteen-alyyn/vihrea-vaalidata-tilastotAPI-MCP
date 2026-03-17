@@ -2,17 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { loadPartyResults, loadCandidateResults } from '../../data/loaders.js';
 import type { ElectionRecord, ElectionType, AreaLevel } from '../../data/types.js';
-
-const ELECTION_TYPE_PARAM = z.enum(['parliamentary', 'municipal', 'eu_parliament', 'presidential', 'regional'])
-  .optional()
-  .describe('Election type. Defaults to "parliamentary".');
-
-/** Returns the finest sub-national area level with kunta-like breakdown for each election type. */
-function subnatLevel(type: ElectionType): AreaLevel {
-  if (type === 'regional') return 'hyvinvointialue';
-  if (type === 'eu_parliament' || type === 'presidential') return 'vaalipiiri';
-  return 'kunta';
-}
+import { ELECTION_TYPE_PARAM, subnatLevel, matchesParty, pct, round2, mcpText, errResult } from '../shared.js';
 
 // ─── Analytics helpers ────────────────────────────────────────────────────────
 
@@ -42,37 +32,12 @@ function concentrationMetrics(areaVotes: number[]): {
   };
 }
 
-function pct(n: number): number {
-  return Math.round(n * 10) / 10;
-}
-
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
-}
-
 function topN<T extends { votes: number }>(rows: T[], n: number): T[] {
   return [...rows].sort((a, b) => b.votes - a.votes).slice(0, n);
 }
 
 function bottomN<T extends { votes: number }>(rows: T[], n: number): T[] {
   return [...rows].sort((a, b) => a.votes - b.votes).slice(0, n);
-}
-
-/**
- * Match a party row by either its numeric code (party_id) or text label (party_name).
- * party_name in 13sw rows is the full text like "Kansallinen Kokoomus" or abbreviated like "KOK".
- */
-function matchesParty(row: ElectionRecord, query: string): boolean {
-  const q = query.toLowerCase().trim();
-  return row.party_id === query || row.party_name?.toLowerCase() === q;
-}
-
-function mcpText(obj: unknown) {
-  return { content: [{ type: 'text' as const, text: JSON.stringify(obj, null, 2) }] };
-}
-
-function errResult(msg: string) {
-  return mcpText({ error: msg });
 }
 
 // ─── Tool registration ────────────────────────────────────────────────────────
@@ -93,12 +58,10 @@ export function registerAnalyticsTools(server: McpServer): void {
       const electionType: ElectionType = election_type ?? 'parliamentary';
       let allRows: ElectionRecord[];
       let tableId: string;
-      let cache_hit: boolean;
       try {
         const result = await loadCandidateResults(year, unit_key, undefined, electionType);
         allRows = result.rows;
         tableId = result.tableId;
-        cache_hit = result.cache_hit;
       } catch (err) {
         return errResult(`Failed to load candidate data: ${String(err)}`);
       }
@@ -168,7 +131,6 @@ export function registerAnalyticsTools(server: McpServer): void {
         method: {
           description: 'Ranks computed at vaalipiiri level using the VP## aggregate row. Geographic analysis uses äänestysalue-level rows only to avoid double-counting.',
           source_table: tableId,
-          cache_hit,
         },
       });
     }
@@ -188,12 +150,10 @@ export function registerAnalyticsTools(server: McpServer): void {
       const areaLvl = subnatLevel(electionType);
       let rows: ElectionRecord[];
       let tableId: string;
-      let cache_hit: boolean;
       try {
         const result = await loadPartyResults(year, undefined, electionType);
         rows = result.rows;
         tableId = result.tableId;
-        cache_hit = result.cache_hit;
       } catch (err) {
         return errResult(`Failed to load party data: ${String(err)}`);
       }
@@ -245,7 +205,6 @@ export function registerAnalyticsTools(server: McpServer): void {
         method: {
           description: `National total from koko_suomi row. Strongest/weakest based on ${areaLvl}-level rows.`,
           source_table: tableId,
-          cache_hit,
         },
       });
     }
@@ -265,12 +224,10 @@ export function registerAnalyticsTools(server: McpServer): void {
       const electionType: ElectionType = election_type ?? 'parliamentary';
       let allRows: ElectionRecord[];
       let tableId: string;
-      let cache_hit: boolean;
       try {
         const result = await loadCandidateResults(year, unit_key, undefined, electionType);
         allRows = result.rows;
         tableId = result.tableId;
-        cache_hit = result.cache_hit;
       } catch (err) {
         return errResult(`Failed to load candidate data: ${String(err)}`);
       }
@@ -280,12 +237,13 @@ export function registerAnalyticsTools(server: McpServer): void {
         : 'vaalipiiri';
       const allVpRows = allRows.filter((r) => r.area_level === unitAreaLevel && r.candidate_id)
         .sort((a, b) => b.votes - a.votes);
+      const rankMap = new Map(allVpRows.map((r, i) => [r.candidate_id, i + 1]));
 
       const comparison = candidate_ids.map((cid) => {
         const vpRow = allVpRows.find((r) => r.candidate_id === cid);
         if (!vpRow) return { candidate_id: cid, error: 'Not found in this vaalipiiri' };
 
-        const rank = allVpRows.findIndex((r) => r.candidate_id === cid) + 1;
+        const rank = rankMap.get(cid) ?? 0;
         const aalueRows = allRows.filter((r) => r.candidate_id === cid && r.area_level === 'aanestysalue');
         const top3 = topN(aalueRows, 3).map((r) => ({ area_name: r.area_name, votes: r.votes }));
 
@@ -308,7 +266,6 @@ export function registerAnalyticsTools(server: McpServer): void {
         method: {
           description: `Votes and ranks from ${unitAreaLevel}-level aggregate rows. Top areas from äänestysalue rows.`,
           source_table: tableId,
-          cache_hit,
         },
       });
     }
@@ -328,12 +285,10 @@ export function registerAnalyticsTools(server: McpServer): void {
       const electionType: ElectionType = election_type ?? 'parliamentary';
       let rows: ElectionRecord[];
       let tableId: string;
-      let cache_hit: boolean;
       try {
         const result = await loadPartyResults(year, area_id ?? 'SSS', electionType);
         rows = result.rows;
         tableId = result.tableId;
-        cache_hit = result.cache_hit;
       } catch (err) {
         return errResult(`Failed to load party data: ${String(err)}`);
       }
@@ -362,7 +317,6 @@ export function registerAnalyticsTools(server: McpServer): void {
         method: {
           description: 'Party votes from party table. Rank is relative to all parties in the same area.',
           source_table: tableId,
-          cache_hit,
         },
       });
     }
@@ -390,22 +344,24 @@ export function registerAnalyticsTools(server: McpServer): void {
       }> = [];
       const tableIds: string[] = [];
 
-      for (const year of years.sort((a, b) => a - b)) {
+      const yearResultsUnsorted = await Promise.all(years.map(async (year) => {
         try {
           const { rows, tableId } = await loadPartyResults(year, effectiveArea, electionType);
           if (!tableIds.includes(tableId)) tableIds.push(tableId);
           const row = rows.find((r) => matchesParty(r, party_id));
           const rank = [...rows].sort((a, b) => b.votes - a.votes).findIndex((r) => r.party_id === row?.party_id) + 1;
-          yearResults.push({
+          return {
             year,
             votes: row?.votes ?? null,
             vote_share_pct: row?.vote_share ? pct(row.vote_share) : null,
             rank: row ? (rank || null) : null,
-          });
-        } catch (_) {
-          yearResults.push({ year, votes: null, vote_share_pct: null, rank: null, error: `No data for ${year}` });
+          };
+        } catch (err) {
+          console.error(`[compare_elections] failed to load year ${year}:`, err);
+          return { year, votes: null, vote_share_pct: null, rank: null, error: `No data for ${year}` };
         }
-      }
+      }));
+      yearResults.push(...yearResultsUnsorted.sort((a, b) => a.year - b.year));
 
       // Compute changes between consecutive years
       const changes = yearResults.slice(1).map((curr, i) => {
@@ -741,12 +697,10 @@ export function registerAnalyticsTools(server: McpServer): void {
       const electionType: ElectionType = election_type ?? 'parliamentary';
       let allRows: ElectionRecord[];
       let tableId: string;
-      let cache_hit: boolean;
       try {
         const result = await loadCandidateResults(year, unit_key, undefined, electionType);
         allRows = result.rows;
         tableId = result.tableId;
-        cache_hit = result.cache_hit;
       } catch (err) {
         return errResult(String(err));
       }
@@ -796,7 +750,6 @@ export function registerAnalyticsTools(server: McpServer): void {
         method: {
           description: 'Ranks computed at vaalipiiri-level aggregate rows. Party total = sum of all party candidate votes at VP level.',
           source_table: tableId,
-          cache_hit,
         },
       });
     }
@@ -860,16 +813,20 @@ export function registerAnalyticsTools(server: McpServer): void {
       const min = sorted[0]!;
       const max = sorted[n - 1]!;
 
-      // Simple histogram: 10 buckets
+      // Simple histogram: 10 equal-width buckets, O(n) single pass
       const bucketSize = Math.ceil((max - min + 1) / 10) || 1;
-      const buckets: Array<{ from: number; to: number; count: number }> = [];
-      for (let i = 0; i < 10; i++) {
-        const from = min + i * bucketSize;
-        const to = from + bucketSize - 1;
-        const count = sorted.filter((v) => v >= from && v <= to).length;
-        buckets.push({ from, to, count });
-        if (to >= max) break;
+      const counts = new Array(10).fill(0) as number[];
+      for (const v of sorted) {
+        const idx = Math.min(9, Math.floor((v - min) / bucketSize));
+        counts[idx]++;
       }
+      const buckets = counts
+        .map((count, i) => ({
+          from: min + i * bucketSize,
+          to: min + (i + 1) * bucketSize - 1,
+          count,
+        }))
+        .filter((b) => b.from <= max);
 
       return mcpText({
         subject_type,

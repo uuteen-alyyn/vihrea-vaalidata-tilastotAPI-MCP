@@ -3,28 +3,7 @@ import { z } from 'zod';
 import { loadPartyResults, loadCandidateResults } from '../../data/loaders.js';
 import { PARLIAMENTARY_TABLES } from '../../data/election-tables.js';
 import type { ElectionRecord, ElectionType } from '../../data/types.js';
-
-const ELECTION_TYPE_PARAM = z.enum(['parliamentary', 'municipal', 'eu_parliament', 'presidential', 'regional'])
-  .optional()
-  .describe('Election type. Defaults to "parliamentary".');
-
-function subnatLevel(type: ElectionType) {
-  if (type === 'regional') return 'hyvinvointialue' as const;
-  if (type === 'eu_parliament' || type === 'presidential') return 'vaalipiiri' as const;
-  return 'kunta' as const;
-}
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function matchesParty(row: ElectionRecord, query: string): boolean {
-  const q = query.toLowerCase().trim();
-  return row.party_id === query || row.party_name?.toLowerCase() === q;
-}
-
-function pct(n: number): number { return Math.round(n * 10) / 10; }
-function round2(n: number): number { return Math.round(n * 100) / 100; }
-function mcpText(obj: unknown) { return { content: [{ type: 'text' as const, text: JSON.stringify(obj, null, 2) }] }; }
-function errResult(msg: string) { return mcpText({ error: msg }); }
+import { ELECTION_TYPE_PARAM, subnatLevel, matchesParty, pct, round2, mcpText, errResult } from '../shared.js';
 
 /** All parliamentary years available in 13sw (1983–2023) */
 const ALL_PARL_YEARS = [1983, 1987, 1991, 1995, 1999, 2003, 2007, 2011, 2015, 2019, 2023];
@@ -90,8 +69,8 @@ export function registerAreaTools(server: McpServer): void {
           const { rows, tableId } = await loadPartyResults(year, area_id, electionType);
           if (!primaryTableId) primaryTableId = tableId;
           yearData.push({ year, rows });
-        } catch (_) {
-          // Skip unavailable years silently
+        } catch (err) {
+          console.error(`[get_area_profile] failed to load year ${year}:`, err);
         }
       }
 
@@ -260,8 +239,8 @@ export function registerAreaTools(server: McpServer): void {
           const { rows, tableId: tid } = await loadPartyResults(year, area_id, electionType);
           if (!tableId) tableId = tid;
           yearData.push({ year, rows: rows.filter(r => r.area_id === area_id) });
-        } catch (_) {
-          // skip
+        } catch (err) {
+          console.error(`[analyze_area_volatility] failed to load year ${year}:`, err);
         }
       }
 

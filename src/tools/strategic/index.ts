@@ -3,23 +3,9 @@ import { z } from 'zod';
 import { loadPartyResults, loadCandidateResults } from '../../data/loaders.js';
 import { getElectionTables } from '../../data/election-tables.js';
 import type { ElectionRecord, ElectionType } from '../../data/types.js';
-
-const ELECTION_TYPE_PARAM = z.enum(['parliamentary', 'municipal', 'eu_parliament', 'presidential', 'regional'])
-  .optional()
-  .describe('Election type. Defaults to "parliamentary".');
-
-function subnatLevel(type: ElectionType) {
-  if (type === 'regional') return 'hyvinvointialue' as const;
-  if (type === 'eu_parliament' || type === 'presidential') return 'vaalipiiri' as const;
-  return 'kunta' as const;
-}
+import { ELECTION_TYPE_PARAM, subnatLevel, matchesParty, pct, round2, mcpText, errResult } from '../shared.js';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function matchesParty(row: ElectionRecord, query: string): boolean {
-  const q = query.toLowerCase().trim();
-  return row.party_id === query || row.party_name?.toLowerCase() === q;
-}
 
 /** Normalize a candidate name for cross-election comparison.
  * Candidate IDs are re-issued each election, so inactive detection must match by name.
@@ -27,22 +13,6 @@ function matchesParty(row: ElectionRecord, query: string): boolean {
 function normalizeCandidateName(name: string | undefined): string {
   if (!name) return '';
   return name.toLowerCase().replace(/ä/g, 'a').replace(/ö/g, 'o').replace(/å/g, 'a').replace(/\s+/g, ' ').trim();
-}
-
-function pct(n: number): number {
-  return Math.round(n * 10) / 10;
-}
-
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
-}
-
-function mcpText(obj: unknown) {
-  return { content: [{ type: 'text' as const, text: JSON.stringify(obj, null, 2) }] };
-}
-
-function errResult(msg: string) {
-  return mcpText({ error: msg });
 }
 
 // ─── Tool registration ────────────────────────────────────────────────────────
@@ -408,7 +378,8 @@ export function registerStrategicTools(server: McpServer): void {
         try {
           const r = await loadPartyResults(trend_year, undefined, electionType);
           trendRows = r.rows;
-        } catch (_) {
+        } catch (err) {
+          console.error(`[rank_target_areas] failed to load trend year ${trend_year}:`, err);
           trendRows = null;
         }
       }

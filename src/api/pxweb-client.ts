@@ -9,19 +9,21 @@ const BASE_URL = 'https://pxdata.stat.fi/PXWeb/api/v1';
 export class PxWebClient {
   private requestTimestamps: number[] = [];
 
-  /** Wait if needed to stay within rate limits */
+  /** Wait if needed to stay within rate limits (iterative — no stack growth) */
   private async throttle(): Promise<void> {
-    const now = Date.now();
-    this.requestTimestamps = this.requestTimestamps.filter(
-      (t) => now - t < RATE_LIMIT_WINDOW_MS
-    );
-    if (this.requestTimestamps.length >= RATE_LIMIT_REQUESTS) {
-      const oldest = this.requestTimestamps[0];
+    while (true) {
+      const now = Date.now();
+      this.requestTimestamps = this.requestTimestamps.filter(
+        (t) => now - t < RATE_LIMIT_WINDOW_MS
+      );
+      if (this.requestTimestamps.length < RATE_LIMIT_REQUESTS) {
+        this.requestTimestamps.push(Date.now());
+        return;
+      }
+      const oldest = this.requestTimestamps[0]!;
       const waitMs = RATE_LIMIT_WINDOW_MS - (now - oldest) + 50;
       await new Promise((resolve) => setTimeout(resolve, waitMs));
-      return this.throttle();
     }
-    this.requestTimestamps.push(Date.now());
   }
 
   /** List nodes (sublevels and tables) at a database path */
@@ -53,20 +55,42 @@ export class PxWebClient {
 
   private async get<T>(url: string): Promise<T> {
     await this.throttle();
-    const res = await fetch(url, { headers: { Accept: 'application/json' } });
-    if (!res.ok) throw new Error(`PxWeb GET ${url} → ${res.status} ${res.statusText}`);
-    return res.json() as Promise<T>;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30_000);
+    try {
+      const res = await fetch(url, {
+        headers: { Accept: 'application/json' },
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        console.error(`PxWeb GET ${url} → ${res.status} ${res.statusText}`);
+        throw new Error(`Upstream data source returned ${res.status}`);
+      }
+      return res.json() as Promise<T>;
+    } finally {
+      clearTimeout(timeoutId);
+    }
   }
 
   private async post<T>(url: string, body: unknown): Promise<T> {
     await this.throttle();
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) throw new Error(`PxWeb POST ${url} → ${res.status} ${res.statusText}`);
-    return res.json() as Promise<T>;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30_000);
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        console.error(`PxWeb POST ${url} → ${res.status} ${res.statusText}`);
+        throw new Error(`Upstream data source returned ${res.status}`);
+      }
+      return res.json() as Promise<T>;
+    } finally {
+      clearTimeout(timeoutId);
+    }
   }
 }
 

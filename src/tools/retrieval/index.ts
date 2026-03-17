@@ -17,10 +17,7 @@ import {
 import { parseOutputMode } from '../../utils/output-mode.js';
 import type { ElectionRecord, ElectionType } from '../../data/types.js';
 import type { PxWebTableMetadata } from '../../api/types.js';
-
-const ELECTION_TYPE_PARAM = z.enum(['parliamentary', 'municipal', 'eu_parliament', 'presidential', 'regional'])
-  .optional()
-  .describe('Election type. Defaults to "parliamentary".');
+import { ELECTION_TYPE_PARAM } from '../shared.js';
 
 // ─── Shared fetch helpers ───────────────────────────────────────────────────
 
@@ -54,8 +51,8 @@ export function registerRetrievalTools(server: McpServer): void {
     async ({ year, election_type, area_id, output_mode }) => {
       const electionType: ElectionType = election_type ?? 'parliamentary';
       try {
-        const { rows, tableId, cache_hit } = await loadPartyResults(year, area_id, electionType);
-        const source = { table_ids: [tableId], query_timestamp: new Date().toISOString(), cache_hit };
+        const { rows, tableId } = await loadPartyResults(year, area_id, electionType);
+        const source = { table_ids: [tableId], query_timestamp: new Date().toISOString() };
         const mode = parseOutputMode(output_mode);
         if (mode === 'analysis') return buildPartyAnalysis(rows, year, source);
         return { content: [{ type: 'text' as const, text: JSON.stringify({ mode: 'data', rows, source }, null, 2) }] };
@@ -89,10 +86,10 @@ export function registerRetrievalTools(server: McpServer): void {
     async ({ year, election_type, unit_key, candidate_id, round, output_mode }) => {
       const electionType: ElectionType = election_type ?? 'parliamentary';
       try {
-        const { rows, tableId, cache_hit } = await loadCandidateResults(
+        const { rows, tableId } = await loadCandidateResults(
           year, unit_key, candidate_id, electionType, round
         );
-        const source = { table_ids: [tableId], query_timestamp: new Date().toISOString(), cache_hit };
+        const source = { table_ids: [tableId], query_timestamp: new Date().toISOString() };
         const mode = parseOutputMode(output_mode);
         if (mode === 'analysis') return buildCandidateAnalysis(rows, year, source);
         return { content: [{ type: 'text' as const, text: JSON.stringify({ mode: 'data', rows, source }, null, 2) }] };
@@ -144,7 +141,7 @@ export function registerRetrievalTools(server: McpServer): void {
         response: { format: 'json' as const },
       };
 
-      const { value: response, cache_hit } = await withCache(
+      const { value: response } = await withCache(
         `data:${tableId}:${year}:${area_id ?? 'all'}`,
         () => pxwebClient.queryTable(dbPath, tableId, query)
       );
@@ -152,7 +149,6 @@ export function registerRetrievalTools(server: McpServer): void {
       const source = {
         table_ids: [tableId],
         query_timestamp: new Date().toISOString(),
-        cache_hit,
       };
 
       // Return raw with column descriptions for turnout (it has many Tiedot measures)
@@ -194,7 +190,7 @@ export function registerRetrievalTools(server: McpServer): void {
     async ({ year, election_type, area_id, include_candidates, unit_key, output_mode }) => {
       const electionType: ElectionType = election_type ?? 'parliamentary';
       try {
-        const { rows: partyRows, tableId, cache_hit } = await loadPartyResults(year, area_id, electionType);
+        const { rows: partyRows, tableId } = await loadPartyResults(year, area_id, electionType);
         const allRows: ElectionRecord[] = [...partyRows];
         const tableIds = [tableId];
 
@@ -206,7 +202,7 @@ export function registerRetrievalTools(server: McpServer): void {
           } catch (_) { /* candidates optional */ }
         }
 
-        const source = { table_ids: tableIds, query_timestamp: new Date().toISOString(), cache_hit };
+        const source = { table_ids: tableIds, query_timestamp: new Date().toISOString() };
         const mode = parseOutputMode(output_mode);
 
         if (mode === 'analysis') {
@@ -244,9 +240,9 @@ export function registerRetrievalTools(server: McpServer): void {
     async ({ year, election_type, area_level, output_mode }) => {
       const electionType: ElectionType = election_type ?? 'parliamentary';
       try {
-        const { rows: allRows, tableId, cache_hit } = await loadPartyResults(year, undefined, electionType);
+        const { rows: allRows, tableId } = await loadPartyResults(year, undefined, electionType);
         const rows = area_level ? allRows.filter(r => r.area_level === area_level) : allRows;
-        const source = { table_ids: [tableId], query_timestamp: new Date().toISOString(), cache_hit };
+        const source = { table_ids: [tableId], query_timestamp: new Date().toISOString() };
         const mode = parseOutputMode(output_mode);
         if (mode === 'analysis') return buildPartyAnalysis(rows, year, source);
         return { content: [{ type: 'text' as const, text: JSON.stringify({ mode: 'data', rows, source }, null, 2) }] };
@@ -349,7 +345,7 @@ async function computeRankings({
 function buildPartyAnalysis(
   rows: ElectionRecord[],
   year: number,
-  source: { table_ids: string[]; query_timestamp: string; cache_hit: boolean }
+  source: { table_ids: string[]; query_timestamp: string }
 ) {
   const byParty = new Map<string, { party_name: string; total_votes: number; areas: number }>();
 
@@ -388,7 +384,7 @@ function buildPartyAnalysis(
 function buildCandidateAnalysis(
   rows: ElectionRecord[],
   year: number,
-  source: { table_ids: string[]; query_timestamp: string; cache_hit: boolean }
+  source: { table_ids: string[]; query_timestamp: string }
 ) {
   const byCandidate = new Map<string, { name: string; party: string; total_votes: number }>();
 

@@ -349,3 +349,56 @@ Build: clean (tsc, no errors).
 **Build:** clean (tsc, no errors).
 
 ---
+
+## Phase 16: System Prompt 2026-03-17 HH:MM:SS
+Rewrote system prompt in src/server.ts to cover all elections added in Phase 11.
+
+Changes:
+- Replaced single-sentence data coverage with a full table (parliamentary, municipal, regional, EU, presidential)
+- Added hyvinvointialue keys for regional elections
+- Structured workflow as numbered steps (resolve → retrieve → analyze → area → strategic → discover → audit) with all tool names inline
+- Added election-specific notes: EU national-only geography, presidential no party dimension + two rounds, 2021 municipal / 2022 regional party-data-only
+- Added one worked example per election type
+- Migrated from deprecated server.prompt() to server.registerPrompt() per current SDK API
+- Fixed escaped backticks in template literal
+
+Build: clean (npm run build, no errors).
+
+---
+
+## PHASE 18 COMPLETE: CODE QUALITY & SECURITY FIXES (CODE_AUDIT.md) — 2026-03-17 14:00:00
+
+Full audit pass addressing all items in CODE_AUDIT.md across 6 groups.
+
+**Security fixes (SEC):**
+- SEC-1: Moved `.claude/` from `.gitignore` exception to ignored — protects GitHub PAT in `.claude/settings.local.json`
+- SEC-3: Replaced recursive `throttle()` in `pxweb-client.ts` with a `while` loop (no unbounded stack growth)
+- SEC-4: Added 30s `AbortController` timeout to both `get()` and `post()` in `pxweb-client.ts`
+- SEC-5: Sanitized error messages in `get()`/`post()` — upstream errors logged internally, callers get a generic message (no URL/status leakage)
+- SEC-6: Added `.max(200)` to all 4 `z.string()` query params in `entity-resolution/index.ts`
+- SEC-7: Added port validation in `server-http.ts` — rejects ports outside 1024–65535 with console warning, falls back to 3000
+
+**Quality fixes (QUAL):**
+- QUAL-2: Registered BUG-1 (`share_of_party_vote` returned as ratio, not percentage) and BUG-2 (analysis mode double-counts totals) in the `CAVEATS` registry in `audit/index.ts`
+- QUAL-3: Replaced all `catch (_)` silent swallows with `catch (err) { console.error(...) }` across `entity-resolution`, `strategic`, and `area` tool files
+- QUAL-4: Added structured request logging to `server-http.ts` (`ISO timestamp METHOD URL status Xms`)
+- QUAL-5: Created `src/tools/shared.ts` with 7 exported shared helpers (`ELECTION_TYPE_PARAM`, `subnatLevel`, `matchesParty`, `pct`, `round2`, `mcpText`, `errResult`) — replaced duplicated local definitions across `analytics`, `strategic`, `area`, `retrieval`, and `audit` tool files
+- QUAL-6: Added `cache-store.json` to `.gitignore` (disk cache is runtime state, not source)
+- QUAL-7: Removed deprecated `vaalipiiri_code` field from `CandidateLoadResult` interface and loader return value in `src/data/loaders.ts`
+- QUAL-8: Removed `cache_hit` from all tool response payloads across `analytics/index.ts` and `retrieval/index.ts` (internal implementation detail, not part of public API)
+- QUAL-9: Removed `audits/` from `.gitignore` — audit documents are source files and should be tracked in git
+
+**Efficiency fixes (EFF):**
+- EFF-1: Parallelized `resolve_entities` — converted serial `for` loop to `Promise.all(entities.map(...))` in `entity-resolution/index.ts`
+- EFF-2: Pre-built `rankMap` in `compare_candidates` — O(n) lookup instead of repeated `.findIndex()` scans
+- EFF-3: Rewrote vote-share histogram from `Array.from({length: 10}).map(...)` O(n²) to a single O(n) pass with pre-allocated `counts` array
+- EFF-4: Extracted `buildBigrams(s)` → `Set<string>` and `bigramSimilarity(aSet, b)` — pre-computes query bigrams once before the candidate `.map()` loop in `resolve_candidate`
+- EFF-5: Parallelized `compare_elections` with `Promise.all` + sort after; removed serial `await` inside loop
+
+**Cost fixes (COST):**
+- COST-1 / COST-4: Rewrote `src/cache/cache.ts` — added LRU eviction (`lruTouch` on get, `lruEvict` on set when full, max 500 entries) and disk persistence (`loadFromDisk()` on init, coalesced `persistAsync()` via `setImmediate`, path configurable via `CACHE_FILE` env var, defaults to `./cache-store.json`)
+
+**Files changed:**
+`src/tools/shared.ts` (new), `src/tools/analytics/index.ts`, `src/tools/entity-resolution/index.ts`, `src/tools/strategic/index.ts`, `src/tools/area/index.ts`, `src/tools/retrieval/index.ts`, `src/tools/audit/index.ts`, `src/data/loaders.ts`, `src/cache/cache.ts`, `src/api/pxweb-client.ts`, `src/server-http.ts`, `.gitignore`
+
+**Build:** clean (tsc, no errors).

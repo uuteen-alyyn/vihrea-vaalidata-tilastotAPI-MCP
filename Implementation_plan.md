@@ -500,7 +500,44 @@ Populate schemas for the existing 2023 and 2019 parliamentary entries.
 
 ---
 
-## Phase 12: Historical Parliamentary Candidate Data (2007–2015)
+## Phase 12: HTTP Deployment — Per-IP Rate Limiting
+
+**Goal:** Protect the public HTTP endpoint from upstream API budget exhaustion by a single abusive client, while keeping the service completely open and frictionless for legitimate election candidate users.
+
+**Design principle:** No passwords, no API keys, no accounts. Open access is intentional — the data is public. Rate limiting operates transparently at the infrastructure level. Users who hit limits get a clear, friendly message explaining what happened and how to get help.
+
+### Context
+
+- Upstream Tilastokeskus API: 10 requests / 10-second window (global limit shared by all clients)
+- `resolve_candidate` without `vaalipiiri`: fires 13 API calls (~13–15s)
+- A single client in a tight loop can fully saturate the upstream budget
+- Target users (campaign teams) will make bursts of 10–20 calls per session, then pause
+
+### Recommended limit
+
+**30 requests / 60 seconds per IP** — generous enough for any realistic campaign session, restrictive enough to prevent runaway loops.
+
+### Tasks
+
+- [ ] Choose deployment path: nginx reverse proxy, Cloudflare, or Azure API Management
+- [ ] Configure rate limit rule: 30 req/min per client IP, burst of 10 allowed
+- [ ] Write the 429 response body (JSON, user-friendly message with admin contact):
+  ```json
+  {
+    "error": "rate_limit_exceeded",
+    "message": "You have made too many requests. Please wait a moment and try again. For campaign use with higher limits, contact [admin email].",
+    "retry_after_seconds": 60
+  }
+  ```
+- [ ] Verify the 429 JSON is returned (not an HTML nginx error page)
+- [ ] Test: confirm a normal Claude Desktop session of 20 calls completes without hitting the limit
+- [ ] Test: confirm a tight loop of 50 rapid calls triggers the 429 correctly
+- [ ] Document the limit in `README.md` (deployment section)
+- [ ] Logbook entry
+
+---
+
+## Phase 13: Historical Parliamentary Candidate Data (2007–2015)
 
 **Goal:** Extend candidate data coverage to 2007, 2011, and 2015 parliamentary elections using StatFin_Passiivi archive tables.
 
@@ -519,7 +556,7 @@ Populate schemas for the existing 2023 and 2019 parliamentary entries.
 
 ---
 
-## Phase 13: Municipal 2021 Candidate Data Gap
+## Phase 14: Municipal 2021 Candidate Data Gap
 
 **Goal:** Determine whether per-äänestysalue candidate tables exist for municipal 2021 in StatFin_Passiivi, and register them if they do.
 
@@ -533,7 +570,7 @@ Populate schemas for the existing 2023 and 2019 parliamentary entries.
 
 ---
 
-## Phase 14: Cross-Election-Type Analytics Tool
+## Phase 15: Cross-Election-Type Analytics Tool
 
 **Goal:** Add a tool that compares a party or candidate across different election types within a single response (e.g. SDP performance municipal 2021 → parliamentary 2023 → regional 2025).
 
@@ -548,13 +585,110 @@ Populate schemas for the existing 2023 and 2019 parliamentary entries.
 
 ---
 
-## Phase 15: System Prompt
+## Phase 16: System Prompt ✅ COMPLETE
 
 **Goal:** Write the system prompt that a consuming LLM (Claude in Claude Desktop) uses to understand which tools exist and how to orchestrate them for analyst queries.
 
+**Implementation notes:**
+- Registered via `server.registerPrompt()` (updated from deprecated `server.prompt()`)
+- Seven sections: electoral context, standard workflow (numbered 1–7 with all tools listed), data coverage table, conventions, election-specific notes, worked examples
+- Data coverage table updated to reflect all Phase 11 elections
+- Added hyvinvointialue keys for regional elections
+- Election-specific caveats: EU national-only, presidential no party + two rounds, 2021/2022 party-data-only
+- One worked example per election type (parliamentary, municipal, regional, EU, presidential)
+
 ### Tasks
-- [ ] Draft system prompt covering all tool categories and election types
-- [ ] Add data coverage and known caveats section
-- [ ] Add worked examples (one per election type)
+- [x] Draft system prompt covering all tool categories and election types
+- [x] Add data coverage and known caveats section
+- [x] Add worked examples (one per election type)
 - [ ] Test system prompt with real queries in Claude Desktop
+- [x] Logbook entry
+
+---
+
+## Phase 17: Math & Analytics Test Suite (QUAL-1)
+
+**Goal:** Add automated test coverage for all deterministic analytics, math helpers, and normalizers. The 10 bugs in `MATH_AUDIT.md` were found by manual inspection — this phase makes regressions impossible to ship silently.
+
+**Context:** The service is positioned as a "deterministic analytics" layer consumed by LLM systems. Without tests, any code change can silently corrupt vote share calculations, ranks, or geographic aggregations. See `audits/CODE_AUDIT.md` → QUAL-1.
+
+### Test framework setup
+- [ ] Add Vitest to dev dependencies (`npm install -D vitest`) — lightweight, ESM-native, no config needed
+- [ ] Add `"test": "vitest run"` to `package.json` scripts
+- [ ] Create `src/__tests__/` directory structure
+
+### Unit tests — pure math helpers
+- [ ] `pct()` — correct rounding, edge cases (0, negative, >100)
+- [ ] `round2()` — correct 2-decimal rounding
+- [ ] `concentrationMetrics()` — zero total, single area, uniform distribution, skewed distribution
+- [ ] `bigramSimilarity()` — identical strings (1.0), empty strings, typical Finnish names
+- [ ] `scoreMatch()` — exact match, normalized match, prefix match, fuzzy match
+- [ ] Pedersen volatility index — stable election (0), total turnover (100), partial change
+- [ ] `parseCandidateValueText()` — all 5 formats (parliamentary, municipal, regional, EU, presidential)
+- [ ] `inferAreaLevelFromCandidateCode()` — each code type (SSS, VP##, KU###, HV##, 3-digit, other)
+
+### Unit tests — normalizer output
+Record a small set of real PxWeb API responses as JSON fixtures in `src/__tests__/fixtures/`. Use these as inputs to normalizer functions without hitting the live API.
+- [ ] `normalizePartyTable()` — modern content-column format, Sar-dimension archive format
+- [ ] `normalizeCandidateByAanestysalue()` — parliamentary 2023, parliamentary 2019 archive, EU (no area var), presidential (with round var)
+- [ ] Verify: no duplicate rows, correct area levels assigned, `vote_share` parsed correctly, `party_total_code` rows excluded
+
+### Regression tests — known bugs from MATH_AUDIT.md
+- [ ] BUG-1: `share_of_party_vote` in `analyze_candidate_profile` equals `share_of_party_vote_pct` in `analyze_within_party_position` × 100 (once fixed)
+- [ ] BUG-2: `buildPartyAnalysis` analysis mode total votes equals data mode total (not 2×)
+- [ ] BUG-3: `total_estimated_lost_votes` can be negative when turnout rose — test and document
+- [ ] BUG-4: `rank_target_areas` — verify c1 and c4 are not always summing to 1.0 after fix
+- [ ] BUG-9: `allVotesByArea` is used in c3 calculation after fix
+
+### Integration smoke tests (live API, skippable in CI)
+- [ ] `loadPartyResults('parliamentary', 2023)` returns rows with correct structure
+- [ ] `loadCandidateResults(2023, 'helsinki', undefined, 'parliamentary')` returns non-empty rows
+- [ ] Cache hit on second identical call
 - [ ] Logbook entry
+
+---
+
+## Phase 18: Code Quality & Security Fixes (CODE_AUDIT.md) ✅ COMPLETE
+
+**Goal:** Address the remaining findings from `audits/CODE_AUDIT.md` that are not covered by earlier phases.
+
+**Reference:** Full details and fix suggestions for each item are in `audits/CODE_AUDIT.md`.
+
+**Implementation notes:**
+- `src/tools/shared.ts` created with 7 shared helpers/constants; all 4 tool files updated to import from it
+- Cache rewritten with LRU eviction (500 entries), disk persistence to `cache-store.json`, and coalesced async writes
+- `resolve_entities` now uses `Promise.all`; `compare_elections` year queries parallelized
+- Query bigrams pre-computed once before candidate inner loop via `buildBigrams` / `scoreMatchFast`
+- `server.prompt()` → `server.registerPrompt()` (deprecation resolved in Phase 16)
+
+### Immediate security fixes
+- [x] **SEC-1** — Add `.claude/` to `.gitignore`; rotate GitHub PAT if any risk of prior commit
+- [x] **SEC-3** — Add 30-second `AbortController` timeout to all `fetch()` calls in `pxweb-client.ts`
+- [x] **SEC-5** — Replace recursive `throttle()` with a `while` loop
+- [x] **SEC-6** — Add `.max(200)` to all `z.string()` parameters used in fuzzy matching
+- [x] **SEC-7** — Validate parsed `PORT` is in range 1024–65535 in `server-http.ts`
+
+### Correctness fixes
+- [x] **QUAL-2** — Add entries to `get_data_caveats` for BUG-1 and BUG-2 (active math bugs); remove once fixed
+- [x] **QUAL-3** — Replace all silent `catch (_) {}` with `console.error(...)` — tool name, year, error message
+- [x] **QUAL-6** — Update system prompt data coverage (done in Phase 16)
+- [x] **SEC-4** — Sanitize error messages to clients: log full details server-side, return generic upstream status to callers
+
+### Efficiency fixes
+- [x] **EFF-1** — Parallelize `resolve_entities`: replace serial `for` loop with `Promise.all`
+- [x] **EFF-2** — Pre-build `Map<candidateId, rank>` in `compare_candidates` instead of repeated `findIndex()` in loops
+- [x] **EFF-3** — Replace histogram O(10n) filter loop with single O(n) bucket-assignment pass in `analyze_vote_distribution`
+- [x] **EFF-4** — Pre-compute query bigram Set once before candidate loop in `resolve_candidate` / `resolve_entities`
+- [x] **EFF-5** — Use `Promise.all` for year queries in `compare_elections`
+
+### Code quality
+- [x] **QUAL-4** — Add basic request logging to HTTP server: timestamp, duration, status code
+- [x] **QUAL-5** — Extract duplicated helpers to `src/tools/shared.ts`; all 4 tool files import from it
+- [x] **QUAL-7** — Remove `@deprecated vaalipiiri_code` field from `CandidateLoadResult`
+- [x] **QUAL-8** — Remove `cache_hit` from all tool response `method` blocks
+- [x] **QUAL-9** — Remove `audits/` from `.gitignore` (replaced with `.claude/`)
+
+### Cache / cost
+- [x] **COST-1** — Persist cache to `cache-store.json`; loaded on startup, written async on `cacheSet`
+- [x] **COST-4** — Add max entry count (500) with LRU eviction (oldest-first Map eviction)
+- [x] Logbook entry

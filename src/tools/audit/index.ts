@@ -1,9 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-
-function mcpText(obj: unknown) {
-  return { content: [{ type: 'text' as const, text: JSON.stringify(obj, null, 2) }] };
-}
+import { mcpText } from '../shared.js';
 
 // ─── Metric definitions ───────────────────────────────────────────────────────
 
@@ -224,6 +221,20 @@ const CAVEATS: Record<string, {
     affects: ['tools reading 13sw without SSS filter'],
     description: 'The 13sw Puolue variable includes a total row with party_id "SSS" (Puolueiden äänet yhteensä, 100% vote share). All area-centric and party-ranking tools in this MCP filter this row out. Raw data mode (output_mode=data) includes it.',
     workaround: 'Filter rows where party_id === "SSS" when processing raw data output.',
+  },
+  bug_share_of_party_vote_ratio: {
+    id: 'bug_share_of_party_vote_ratio',
+    severity: 'moderate',
+    affects: ['analyze_candidate_profile'],
+    description: 'KNOWN BUG (BUG-1): The share_of_party_vote field in analyze_candidate_profile is returned as a ratio (0–1) rather than a percentage. The value 0.19 means 19%, not 0.19%. The analyze_within_party_position tool correctly returns share_of_party_vote_pct as a percentage. Use analyze_within_party_position for the percentage form.',
+    workaround: 'Multiply share_of_party_vote from analyze_candidate_profile by 100 to get a percentage. Or use analyze_within_party_position which returns share_of_party_vote_pct correctly.',
+  },
+  bug_analysis_mode_double_count: {
+    id: 'bug_analysis_mode_double_count',
+    severity: 'moderate',
+    affects: ['get_party_results (analysis mode)', 'get_area_results (analysis mode)', 'get_election_results (analysis mode)'],
+    description: 'KNOWN BUG (BUG-2): When output_mode is "analysis", the total_votes figure in the summary block double-counts votes — it sums both the kunta-level rows and the vaalipiiri/national aggregate rows. The data mode (output_mode=data) returns correct individual row values. The analysis mode summary total is approximately 2× the correct value.',
+    workaround: 'Use output_mode=data and sum votes yourself, or use get_rankings / get_election_results in data mode for accurate totals.',
   },
 };
 

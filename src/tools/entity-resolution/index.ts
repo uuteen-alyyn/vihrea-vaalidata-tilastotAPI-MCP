@@ -23,16 +23,15 @@ function normalizeStr(s: string): string {
     .trim();
 }
 
-function bigramSimilarity(a: string, b: string): number {
-  if (a === b) return 1;
-  if (a.length < 2 || b.length < 2) return a === b ? 1 : 0;
-  const bigrams = (s: string): Set<string> => {
-    const set = new Set<string>();
-    for (let i = 0; i < s.length - 1; i++) set.add(s.slice(i, i + 2));
-    return set;
-  };
-  const aSet = bigrams(a);
-  const bSet = bigrams(b);
+function buildBigrams(s: string): Set<string> {
+  const set = new Set<string>();
+  for (let i = 0; i < s.length - 1; i++) set.add(s.slice(i, i + 2));
+  return set;
+}
+
+function bigramSimilarity(aSet: Set<string>, b: string): number {
+  if (aSet.size === 0 || b.length < 2) return 0;
+  const bSet = buildBigrams(b);
   let intersection = 0;
   for (const bg of aSet) if (bSet.has(bg)) intersection++;
   return (2 * intersection) / (aSet.size + bSet.size);
@@ -47,7 +46,19 @@ function scoreMatch(query: string, candidate: string): number {
   if (qNorm === cNorm) return 0.95;
   if (cLow.startsWith(qLow) || cLow.includes(` ${qLow}`) || cLow.includes(`${qLow} `)) return 0.88;
   if (cNorm.startsWith(qNorm) || cNorm.includes(qNorm)) return 0.82;
-  return bigramSimilarity(qNorm, cNorm);
+  return bigramSimilarity(buildBigrams(qNorm), cNorm);
+}
+
+/** Pre-computed scorer for batch candidate loops — avoids rebuilding query bigrams on every iteration. */
+function scoreMatchFast(
+  qLow: string, qNorm: string, qBigrams: Set<string>,
+  cLow: string, cNorm: string,
+): number {
+  if (qLow === cLow) return 1.0;
+  if (qNorm === cNorm) return 0.95;
+  if (cLow.startsWith(qLow) || cLow.includes(` ${qLow}`) || cLow.includes(`${qLow} `)) return 0.88;
+  if (cNorm.startsWith(qNorm) || cNorm.includes(qNorm)) return 0.82;
+  return bigramSimilarity(qBigrams, cNorm);
 }
 
 function confidenceLabel(score: number): 'exact' | 'high' | 'medium' | 'low' {
@@ -270,7 +281,7 @@ export function registerEntityResolutionTools(server: McpServer): void {
     'resolve_party',
     'Resolves a fuzzy party name or abbreviation to a canonical party_id usable in other tools. Handles Finnish names, Swedish names, abbreviations, and English equivalents. Falls back to live metadata search if no static match found.',
     {
-      query: z.string().describe('Party name or abbreviation to resolve (e.g. "kokoomus", "KOK", "National Coalition Party", "SDP", "Perussuomalaiset", "True Finns").'),
+      query: z.string().max(200).describe('Party name or abbreviation to resolve (e.g. "kokoomus", "KOK", "National Coalition Party", "SDP", "Perussuomalaiset", "True Finns").'),
       year: z.number().optional().describe('Election year for metadata fallback. Defaults to 2023.'),
     },
     async ({ query, year = 2023 }) => {
@@ -368,8 +379,9 @@ export function registerEntityResolutionTools(server: McpServer): void {
             }
           }
         }
-      } catch (_) {
-        // metadata fetch failed — fall through to no-match response
+      } catch (err) {
+        console.error('[resolve_candidate] metadata fetch failed:', err);
+        // fall through to no-match response
       }
 
       return {
@@ -389,7 +401,7 @@ export function registerEntityResolutionTools(server: McpServer): void {
     'resolve_area',
     'Resolves a fuzzy municipality, vaalipiiri, or area name to a canonical area_id usable in other tools. Handles Finnish and Swedish name forms, spelling variations, and partial names. Returns the area_id in the format used by get_party_results, get_area_results, and related tools.',
     {
-      query: z.string().describe('Area name to resolve (e.g. "Helsinki", "Helsingfors", "Hki", "Pirkanmaa vaalipiiri", "Tampere", "Uusimaa").'),
+      query: z.string().max(200).describe('Area name to resolve (e.g. "Helsinki", "Helsingfors", "Hki", "Pirkanmaa vaalipiiri", "Tampere", "Uusimaa").'),
       area_level: z.enum(['kunta', 'vaalipiiri', 'koko_suomi']).optional().describe('Restrict results to a specific area level. Omit to search all levels.'),
       year: z.number().optional().describe('Election year for area metadata. Defaults to 2023.'),
     },
@@ -471,7 +483,7 @@ export function registerEntityResolutionTools(server: McpServer): void {
     'resolve_candidate',
     'Resolves a fuzzy candidate name to a canonical candidate_id and name. Requires specifying the vaalipiiri to limit the search (fetching all 13 vaalipiiri tables simultaneously would take ~30s). Use list_vaalipiirit or describe_election to find vaalipiiri keys.',
     {
-      query: z.string().describe('Candidate name to search for (full or partial, with or without surname-first format). Example: "Heinäluoma", "Eveliina Heinäluoma", "Heinaluoma Eveliina".'),
+      query: z.string().max(200).describe('Candidate name to search for (full or partial, with or without surname-first format). Example: "Heinäluoma", "Eveliina Heinäluoma", "Heinaluoma Eveliina".'),
       year: z.number().describe('Election year (e.g. 2023).'),
       vaalipiiri: z.string().optional().describe('Vaalipiiri key to limit search scope (e.g. "helsinki", "uusimaa", "pirkanmaa"). Omit to search all 13 vaalipiirit — this requires 13 API calls and takes ~15s.'),
       party: z.string().optional().describe('Party abbreviation to narrow results (e.g. "SDP", "KOK"). Case-insensitive, optional.'),
@@ -501,17 +513,22 @@ export function registerEntityResolutionTools(server: McpServer): void {
 
       // Score: try both "Lastname Firstname" and "Firstname Lastname" orderings
       const queryNorm = normalizeStr(query);
+      const queryLow = query.toLowerCase().trim();
+      const queryBigrams = buildBigrams(queryNorm);
       const queryParts = queryNorm.split(' ');
       const queryReversed = queryParts.length >= 2
         ? queryParts.slice(1).join(' ') + ' ' + queryParts[0]
         : queryNorm;
+      const queryReversedLow = queryReversed.toLowerCase().trim();
+      const queryReversedBigrams = buildBigrams(queryReversed);
 
       const scored = filtered
         .map((c) => {
           const nameNorm = normalizeStr(c.candidate_name);
+          const nameLow = c.candidate_name.toLowerCase().trim();
           const s = Math.max(
-            scoreMatch(queryNorm, nameNorm),
-            scoreMatch(queryReversed, nameNorm),
+            scoreMatchFast(queryLow, queryNorm, queryBigrams, nameLow, nameNorm),
+            scoreMatchFast(queryReversedLow, queryReversed, queryReversedBigrams, nameLow, nameNorm),
             // Also score against just the last name (first token in "Lastname Firstname" format)
             scoreMatch(queryNorm, nameNorm.split(' ')[0] ?? ''),
           );
@@ -565,7 +582,7 @@ export function registerEntityResolutionTools(server: McpServer): void {
     {
       entities: z.array(z.object({
         entity_type: z.enum(['candidate', 'party', 'area']).describe('Type of entity to resolve.'),
-        query: z.string().describe('Name or label to resolve.'),
+        query: z.string().max(200).describe('Name or label to resolve.'),
         year: z.number().optional().describe('Election year context. Defaults to 2023.'),
         vaalipiiri: z.string().optional().describe('For candidates: vaalipiiri key to limit search scope.'),
         party: z.string().optional().describe('For candidates: party abbreviation to narrow results.'),
@@ -582,24 +599,21 @@ export function registerEntityResolutionTools(server: McpServer): void {
         };
       }
 
-      const results: unknown[] = [];
-
-      for (const entity of entities) {
+      const results = await Promise.all(entities.map(async (entity) => {
         const year = entity.year ?? 2023;
 
         if (entity.entity_type === 'party') {
           const normalized = normalizeStr(entity.query);
           const staticMatch = PARTY_ALIASES[normalized] ?? PARTY_ALIASES[entity.query.toLowerCase().trim()];
           if (staticMatch) {
-            results.push({
+            return {
               input: entity.query,
               entity_type: 'party',
               party_id: staticMatch.abbreviation,
               canonical_name: staticMatch.canonical_name_fi,
               match_confidence: 'exact' as const,
               possible_alternatives: [],
-            });
-            continue;
+            };
           }
           // Fuzzy against alias keys
           const best = Object.keys(PARTY_ALIASES)
@@ -608,17 +622,16 @@ export function registerEntityResolutionTools(server: McpServer): void {
             .sort((a, b) => b.score - a.score)[0];
           if (best) {
             const alias = PARTY_ALIASES[best.k]!;
-            results.push({
+            return {
               input: entity.query,
               entity_type: 'party',
               party_id: alias.abbreviation,
               canonical_name: alias.canonical_name_fi,
               match_confidence: confidenceLabel(best.score),
               possible_alternatives: [],
-            });
-          } else {
-            results.push({ input: entity.query, entity_type: 'party', error: 'No match found' });
+            };
           }
+          return { input: entity.query, entity_type: 'party', error: 'No match found' };
 
         } else if (entity.entity_type === 'area') {
           try {
@@ -641,19 +654,18 @@ export function registerEntityResolutionTools(server: McpServer): void {
               .filter((a) => a.score >= 0.45)
               .sort((a, b) => b.score - a.score)[0];
             if (best) {
-              results.push({
+              return {
                 input: entity.query,
                 entity_type: 'area',
                 area_id: best.area_id,
                 area_name: best.area_name,
                 area_level: best.area_level,
                 match_confidence: confidenceLabel(best.score),
-              });
-            } else {
-              results.push({ input: entity.query, entity_type: 'area', error: 'No match found' });
+              };
             }
+            return { input: entity.query, entity_type: 'area', error: 'No match found' };
           } catch (err) {
-            results.push({ input: entity.query, entity_type: 'area', error: String(err) });
+            return { input: entity.query, entity_type: 'area', error: String(err) };
           }
 
         } else if (entity.entity_type === 'candidate') {
@@ -667,21 +679,29 @@ export function registerEntityResolutionTools(server: McpServer): void {
             const partyNorm = entity.party ? entity.party.toLowerCase().trim() : null;
             const filtered = partyNorm ? cands.filter((c) => c.party.toLowerCase().includes(partyNorm)) : cands;
             const qNorm = normalizeStr(entity.query);
+            const qLow = entity.query.toLowerCase().trim();
+            const qBigrams = buildBigrams(qNorm);
             const qParts = qNorm.split(' ');
             const qRev = qParts.length >= 2 ? qParts.slice(1).join(' ') + ' ' + qParts[0] : qNorm;
+            const qRevLow = qRev.toLowerCase().trim();
+            const qRevBigrams = buildBigrams(qRev);
             const best = filtered
-              .map((c) => ({
-                ...c,
-                score: Math.max(
-                  scoreMatch(qNorm, normalizeStr(c.candidate_name)),
-                  scoreMatch(qRev, normalizeStr(c.candidate_name)),
-                  scoreMatch(qNorm, normalizeStr(c.candidate_name).split(' ')[0] ?? ''),
-                ),
-              }))
+              .map((c) => {
+                const cNorm = normalizeStr(c.candidate_name);
+                const cLow = c.candidate_name.toLowerCase().trim();
+                return {
+                  ...c,
+                  score: Math.max(
+                    scoreMatchFast(qLow, qNorm, qBigrams, cLow, cNorm),
+                    scoreMatchFast(qRevLow, qRev, qRevBigrams, cLow, cNorm),
+                    scoreMatch(qNorm, cNorm.split(' ')[0] ?? ''),
+                  ),
+                };
+              })
               .filter((c) => c.score >= 0.45)
               .sort((a, b) => b.score - a.score)[0];
             if (best) {
-              results.push({
+              return {
                 input: entity.query,
                 entity_type: 'candidate',
                 candidate_id: best.candidate_id,
@@ -690,15 +710,15 @@ export function registerEntityResolutionTools(server: McpServer): void {
                 vaalipiiri: best.vaalipiiri_name,
                 vaalipiiri_key: best.vaalipiiri_key,
                 match_confidence: confidenceLabel(best.score),
-              });
-            } else {
-              results.push({ input: entity.query, entity_type: 'candidate', error: 'No match found' });
+              };
             }
+            return { input: entity.query, entity_type: 'candidate', error: 'No match found' };
           } catch (err) {
-            results.push({ input: entity.query, entity_type: 'candidate', error: String(err) });
+            return { input: entity.query, entity_type: 'candidate', error: String(err) };
           }
         }
-      }
+        return { input: entity.query, error: 'Unknown entity_type' };
+      }));
 
       return {
         content: [{

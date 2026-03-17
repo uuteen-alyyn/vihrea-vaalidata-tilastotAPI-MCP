@@ -26,8 +26,6 @@ export interface LoadResult {
 export interface CandidateLoadResult extends LoadResult {
   /** The VP## or HV## code for the geographic-unit aggregate row in this table */
   unit_code: string;
-  /** @deprecated Use unit_code instead */
-  vaalipiiri_code: string;
 }
 
 export async function fetchMetadataCached(
@@ -226,7 +224,7 @@ export async function loadCandidateResults(
     response, metadata, year, electionType, roundFilter
   );
 
-  return { rows, tableId, cache_hit, unit_code, vaalipiiri_code: unit_code };
+  return { rows, tableId, cache_hit, unit_code };
 }
 
 export type { ElectionRecord };
