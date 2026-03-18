@@ -830,3 +830,23 @@ Audited all data-coverage claims in `SYSTEM_PROMPT` (src/server.ts) against actu
 **No changes to code or data layer** — only the system prompt string in server.ts.
 
 **Build:** clean. **Tests:** 132/132 passed.
+
+---
+
+## PHASE 27: COST-3 MULTI-YEAR PARTY TABLE CACHE FIX — 2026-03-18
+
+**Problem:** `loadPartyResults` always included year in both the API query filter (`Vuosi=year`) and the cache key. This meant `compare_elections` made one API call per year even when all years live in the same multi-year PxWeb table (13sw parliamentary, 14z7 municipal, 14y4 regional, 14gv EU). For a 4-year comparison that's 4 API calls to the same table — 3 unnecessary.
+
+**Fix:** Detect multi-year tables by checking whether the `Vuosi` variable in metadata has more than one value. If multi-year:
+- Omit `Vuosi` filter from API query (fetch all years in one response)
+- Use cache key `data:${tableId}:all_years:${areaId ?? 'all'}` (shared across years)
+- After cache retrieval, filter `response.data` to the requested year via `filterResponseByYear()`
+
+Single-year tables are unchanged (existing cache key pattern preserved).
+
+**Files changed:**
+- `src/data/loaders.ts` — `loadPartyResults` logic; new exported `filterResponseByYear()` helper
+
+**New test file:** `src/data/loaders.cache.test.ts` — 6 tests for `filterResponseByYear`: correct year filtering, empty result for absent year, Vuosi not in first column position, no-Vuosi passthrough.
+
+**Build:** clean. **Tests:** 138/138 passed (6 new).

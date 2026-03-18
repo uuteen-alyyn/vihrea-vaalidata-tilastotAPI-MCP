@@ -23,7 +23,24 @@ import {
   getDatabasePath,
 } from './election-tables.js';
 import type { ElectionRecord, ElectionType, VoterBackgroundRow, VoterTurnoutDemographicRow } from './types.js';
-import type { PxWebTableMetadata } from '../api/types.js';
+import type { PxWebResponse, PxWebTableMetadata } from '../api/types.js';
+
+/**
+ * Filter a PxWeb response to rows matching a specific year.
+ * Used after a multi-year cache retrieval to hand the normalizer
+ * a year-homogeneous slice without repeating an API call.
+ *
+ * Exported for unit testing.
+ */
+export function filterResponseByYear(response: PxWebResponse, year: number): PxWebResponse {
+  const keyColumns = response.columns.filter((c) => c.type === 'd' || c.type === 't');
+  const vuosiKeyIdx = keyColumns.findIndex((c) => c.code === 'Vuosi');
+  if (vuosiKeyIdx < 0) return response;
+  return {
+    ...response,
+    data: response.data.filter((row) => row.key[vuosiKeyIdx] === String(year)),
+  };
+}
 
 export interface LoadResult {
   rows: ElectionRecord[];
@@ -76,11 +93,19 @@ export async function loadPartyResults(
   const tableId = tables.party_by_kunta;
   const metadata = await fetchMetadataCached(dbPath, tableId);
 
+  // Detect multi-year table: Vuosi variable present with more than one value.
+  // Multi-year tables (13sw, 14z7, 14y4, 14gv) cover multiple elections in one PxWeb
+  // table. We cache the full response (all years) so compare_elections can serve
+  // additional years as cache hits — zero extra API calls.
+  const vuosiVar = metadata.variables.find((v) => v.code === 'Vuosi');
+  const isMultiYear = (vuosiVar?.values.length ?? 0) > 1;
+
   type FilterItem = { code: string; selection: { filter: 'item' | 'all'; values: string[] } };
   const filters: FilterItem[] = [];
 
-  // Year filter (all multi-year tables have a Vuosi variable)
-  if (metadata.variables.some((v) => v.code === 'Vuosi')) {
+  // Year filter — only for single-year tables; multi-year tables fetch all years
+  // and filter post-cache (see filterResponseByYear below).
+  if (vuosiVar && !isMultiYear) {
     filters.push({ code: 'Vuosi', selection: { filter: 'item', values: [String(year)] } });
   }
 
@@ -113,11 +138,20 @@ export async function loadPartyResults(
   });
 
   const query = { query: filters, response: { format: 'json' as const } };
-  const cacheKey = `data:${tableId}:${electionType}:${year}:${areaId ?? 'all'}`;
 
-  const { value: response, cache_hit } = await withCache(cacheKey, () =>
+  // Multi-year tables: cache key excludes year — one entry serves all years.
+  // Single-year tables: keep year in key (existing behaviour, no regression).
+  const cacheKey = isMultiYear
+    ? `data:${tableId}:all_years:${areaId ?? 'all'}`
+    : `data:${tableId}:${electionType}:${year}:${areaId ?? 'all'}`;
+
+  const { value: rawResponse, cache_hit } = await withCache(cacheKey, () =>
     pxwebClient.queryTable(dbPath, tableId, query)
   );
+
+  // For multi-year tables, slice the cached all-years response down to the
+  // requested year before passing to the normalizer.
+  const response = isMultiYear ? filterResponseByYear(rawResponse, year) : rawResponse;
 
   const rows = normalizePartyTable(response, metadata, year, electionType, schema);
   return { rows, tableId, cache_hit };

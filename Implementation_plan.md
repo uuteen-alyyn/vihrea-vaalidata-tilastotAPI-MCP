@@ -1714,7 +1714,7 @@ Cross-reference source: `src/data/election-tables.ts` registrations.
 
 ---
 
-## Phase 27: COST-3 Multi-Year Party Table Cache Fix ⬜ PLANNED
+## Phase 27: COST-3 Multi-Year Party Table Cache Fix ✅ COMPLETE
 
 **Goal:** `compare_elections` currently makes N separate Tilastokeskus API calls when comparing N years
 on the same multi-year party table (13sw, 14z7, 14y4, 14gv). After this fix, the 2nd+ year is a cache
