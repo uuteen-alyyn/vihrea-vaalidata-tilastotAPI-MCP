@@ -7,28 +7,20 @@ Persistent work queue. Items are added when requested and removed only when expl
 
 ## 🔴 Critical (fix before production use)
 
-### STAT-2: BUG-5 fix may be incomplete — `analyze_candidate_profile` and `analyze_party_profile` may still return fractions from `concentrationMetrics`
-- **File:** `src/tools/analytics/index.ts`
-- **Issue:** Phase 19 fixed `concentrationMetrics()` to return `_pct` fields, but only `analyze_geographic_concentration` was explicitly updated to use the new field names. The same `concentrationMetrics` function is used in `analyze_candidate_profile` and `analyze_party_profile` — those callers may still reference old field names (`top1_share` etc.) and receive fractions.
-- **Fix:** Audit all callers of `concentrationMetrics()` and update to `top1_share_pct`, `top3_share_pct`, etc.
-
 ### NEW-SEC-5: No TLS
 - **File:** `src/server-http.ts`
 - **Issue:** Service runs plain HTTP.
-- **Fix:** Add TLS termination (reverse proxy or direct).
+- **Fix:** Infrastructure-level — reverse proxy, Cloudflare, or Azure TLS offload. No application code change needed.
 
 ---
 
 ## 🟡 Medium priority
 
-### POL-10: `find_area_overperformance` doesn't contextualise by area size
-- **Issue:** A 5pp overperformance in a 1,000-voter municipality ≠ 5pp in a 100,000-voter city.
-
 ### COST-3: Year in cache key causes redundant API calls in `compare_elections`
-- **Issue:** Each election year is a separate cache entry; `compare_elections` calls the API N times when data could be batched. Investigated in Phase 24 — architectural change needed; deferred.
+- **Issue:** Each election year is a separate cache entry; `compare_elections` calls the API N times when data could be batched. Investigated Phase 24 — architectural change needed; deferred indefinitely.
 
-### QUAL-6: System prompt may document wrong data coverage
-- **Issue:** No system prompt file found in-repo (external Claude Desktop prompt). Cannot audit in-tree.
+### QUAL-6: System prompt data coverage audit
+- **Issue:** Must be done via live server (system prompt registered at runtime via `server.registerPrompt()`). Deferred to Phase 26 live tests.
 
 ---
 

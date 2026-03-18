@@ -736,3 +736,24 @@ Removed 20+ resolved items (Phases 20–23 fixes: NEW-SEC-1/2/3/4/6/9/10, FUNC-5
 - No new tests added: Phase 24 changes are logging/documentation only; existing 101 tests cover all functional paths.
 
 **Build:** clean. **Tests:** 101/101 passed.
+
+## PHASE 25: BACKLOG AUDIT CLOSURE — 2026-03-18 13:29:00
+
+### Investigation findings
+
+**STAT-2 — false alarm**
+Audited all `concentrationMetrics()` callers: `analyze_candidate_profile` (line 125), `analyze_party_profile` (line 204), and both branches of `analyze_geographic_concentration` (lines 672, 700). All callers embed the whole returned object directly into the response without destructuring. Since Phase 19 already fixed `concentrationMetrics()` to return `_pct`-suffixed fields, the output is correct everywhere. No code change needed. STAT-2 closed as false alarm.
+
+**POL-10 — partial fix needed**
+`find_area_overperformance` already had `area_total_votes` in both party and candidate branches (added in Phase 23). `find_area_underperformance` was missing it — inconsistency with its symmetric counterpart. Added `area_total_votes` to both party branch (from summing `areaTotalsP` map over `areaLvl` rows) and candidate branch (from `areaTotalsC` map over `aanestysalue` rows). Output is now symmetric.
+
+**NEW-SEC-5** — TLS is infrastructure-only; no application code change possible or appropriate. Documented as deployment concern.
+
+**COST-3 / QUAL-6** — already assessed in Phase 24. Remain in BACKLOG as low-priority deferred items.
+
+### Plan updates
+- Added Phase 25 to `Implementation_plan.md` with full findings
+- Renamed old Phase 25 (live tests) → Phase 26; added QUAL-6 live-server audit to its scope
+- Removed resolved STAT-2 and POL-10 from BACKLOG; updated COST-3 and QUAL-6 descriptions
+
+**Build:** clean. **Tests:** 101/101 passed.

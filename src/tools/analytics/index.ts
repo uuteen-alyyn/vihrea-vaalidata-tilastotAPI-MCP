@@ -564,6 +564,12 @@ export function registerAnalyticsTools(server: McpServer): void {
         const baseline = nationalRow?.vote_share;
         if (!baseline) return errResult(`No national vote share found for party "${subject_id}" in ${year}.`);
 
+        // POL-10: area total votes for size context (consistent with find_area_overperformance)
+        const areaTotalsP = new Map<string, number>();
+        for (const r of rows.filter((r) => r.area_level === areaLvl && r.party_id !== 'SSS')) {
+          areaTotalsP.set(r.area_id, (areaTotalsP.get(r.area_id) ?? 0) + r.votes);
+        }
+
         const subnatRows = rows.filter((r) => matchesParty(r, subject_id) && r.area_level === areaLvl && r.votes >= min_votes);
         const underperf = subnatRows
           .filter((r) => r.vote_share !== undefined && r.vote_share < baseline)
@@ -571,6 +577,7 @@ export function registerAnalyticsTools(server: McpServer): void {
             area_id: r.area_id,
             area_name: r.area_name,
             votes: r.votes,
+            area_total_votes: areaTotalsP.get(r.area_id) ?? null,
             area_vote_share_pct: pct(r.vote_share!),
             baseline_pct: pct(baseline),
             underperformance_pp: round2(baseline - r.vote_share!),
@@ -611,6 +618,12 @@ export function registerAnalyticsTools(server: McpServer): void {
         const baseline = vpRow.vote_share;
         if (!baseline) return errResult(`No unit-level vote share for candidate ${subject_id}.`);
 
+        // POL-10: area total votes for size context (consistent with find_area_overperformance)
+        const areaTotalsC = new Map<string, number>();
+        for (const r of allRows.filter((r) => r.area_level === 'aanestysalue')) {
+          areaTotalsC.set(r.area_id, (areaTotalsC.get(r.area_id) ?? 0) + r.votes);
+        }
+
         const aalueRows = allRows.filter((r) => r.candidate_id === subject_id && r.area_level === 'aanestysalue' && r.votes >= min_votes);
         const underperf = aalueRows
           .filter((r) => r.vote_share !== undefined && r.vote_share < baseline)
@@ -618,6 +631,7 @@ export function registerAnalyticsTools(server: McpServer): void {
             area_id: r.area_id,
             area_name: r.area_name,
             votes: r.votes,
+            area_total_votes: areaTotalsC.get(r.area_id) ?? null,
             area_vote_share_pct: pct(r.vote_share!),
             baseline_pct: pct(baseline),
             underperformance_pp: round2(baseline - r.vote_share!),

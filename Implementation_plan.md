@@ -742,3 +742,972 @@ Tool: `compare_across_elections` — added to `src/tools/analytics/index.ts`
 - [x] **COST-1** — Persist cache to `cache-store.json`; loaded on startup, written async on `cacheSet`
 - [x] **COST-4** — Add max entry count (500) with LRU eviction (oldest-first Map eviction)
 - [x] Logbook entry
+
+---
+
+## Phase 19: MATH_AUDIT Bug Fixes ✅ COMPLETE
+
+**Goal:** Fix all 10 bugs identified in `audits/MATH_AUDIT.md` and confirmed still-open in `audits/POLSCI_AUDIT_2026-03.md`. Bugs BUG-1 through BUG-10 were documented as regression tests in `src/bugs.regression.test.ts` (Phase 17) but the underlying code was never corrected.
+
+**Reference files:**
+- `audits/MATH_AUDIT.md` — original bug descriptions with exact fix suggestions
+- `src/bugs.regression.test.ts` — regression tests that must be updated to assert fixed behavior after each fix
+- `src/tools/audit/index.ts` — contains `get_data_caveats` entries for BUG-1 and BUG-2 that must be removed once those bugs are resolved
+
+**Output schema changes (breaking — LLM consumers must be aware):**
+- `analyze_candidate_profile`: `share_of_party_vote` (0–1 ratio) → `share_of_party_vote_pct` (percentage) — BUG-1
+- `find_exposed_vote_pools`: `total_estimated_lost_votes` → `net_vote_count_change_in_exposed_areas` + new field `total_share_points_lost_in_exposed_areas` — BUG-3
+- `analyze_candidate_profile` / `analyze_party_profile`: concentration fields `top1_share`, `top3_share`, etc. → `top1_share_pct`, `top3_share_pct`, etc. (×100 applied at source) — BUG-5
+- `rank_target_areas`: c4 component removed; weights redistributed; scoring_methodology updated — BUG-4/BUG-9
+
+**Dependency ordering:**
+- BUG-9 must be fixed before BUG-4 (c3 fix is a prerequisite for the c4 redesign)
+- All code fixes should be complete before updating `bugs.regression.test.ts`
+- `audit/index.ts` caveats removed last (after BUG-1 and BUG-2 are confirmed fixed by tests)
+
+---
+
+### Step 1: BUG-2 — Fix `buildPartyAnalysis` double-counting (🔴 Critical)
+
+**File:** `src/tools/retrieval/index.ts:353`
+
+**Change:**
+```typescript
+// Before:
+if (!row.party_id || row.area_level === 'koko_suomi') continue;
+
+// After:
+if (!row.party_id || row.area_level !== 'kunta') continue;
+```
+
+**Why `kunta` and not `aanestysalue`:** The comment in `Implementation_plan.md` Phase 6 confirms geographic analysis uses äänestysalue to avoid double-counting, but `buildPartyAnalysis` is used for party-level summaries where kunta is the right resolution (13sw has no äänestysalue breakdown). Filtering to `kunta` excludes vaalipiiri-level aggregates and koko_suomi correctly.
+
+**Regression test update:** `BUG-2` describe block — change the `[CURRENTLY FAILING]` test to assert the fix path produces the correct value (`3000`, not `6000`).
+
+- [ ] Fix `retrieval/index.ts:353`
+- [ ] Update `bugs.regression.test.ts` BUG-2 block
+
+---
+
+### Step 2: BUG-1 — Fix `share_of_party_vote` ratio vs percentage (🔴 Critical)
+
+**Files:** `src/tools/analytics/index.ts:96,127`
+
+**Change:**
+```typescript
+// Before (line 96):
+const shareOfPartyVote = partyTotalVotes > 0 ? round2(totalVotes / partyTotalVotes) : null;
+// Before (line 127):
+share_of_party_vote: shareOfPartyVote,
+
+// After:
+const shareOfPartyVotePct = partyTotalVotes > 0 ? pct(totalVotes / partyTotalVotes * 100) : null;
+// After:
+share_of_party_vote_pct: shareOfPartyVotePct,
+```
+
+**Cross-cutting changes required in `src/tools/audit/index.ts`:**
+- Line 53: rename metric registry key from `share_of_party_vote` to `share_of_party_vote_pct`
+- Line 57: update formula string to reflect pct output
+- Line 250: update `explain_metric` parameter hint text
+- Line 327: update `trace_result_lineage` transformations array
+- Line 460: update recommendation text
+
+**Regression test update:** `BUG-1` describe block — the `[CURRENTLY FAILING]` test (asserts `buggyResult === 0.23`) becomes the baseline to remove or replace; add assertion that the fixed formula returns `23`.
+
+- [ ] Fix `analytics/index.ts:96,127`
+- [ ] Update `audit/index.ts` metric references (lines 53, 57, 250, 327, 460)
+- [ ] Update `bugs.regression.test.ts` BUG-1 block
+
+---
+
+### Step 3: BUG-5 — Fix concentration fractions missing unit context (🟠 High)
+
+**File:** `src/tools/analytics/index.ts` — `concentrationMetrics()` function + all call sites
+
+**Approach:** Multiply by 100 and rename fields **at the source** in `concentrationMetrics()` so all consumers receive percentages automatically.
+
+```typescript
+// Before in concentrationMetrics():
+const topShare = (n: number) =>
+  Math.round((sorted.slice(0, n).reduce((s, v) => s + v, 0) / total) * 1000) / 1000;
+return { top1_share: topShare(1), top3_share: topShare(3), ... };
+
+// After:
+const topShare = (n: number) =>
+  pct((sorted.slice(0, n).reduce((s, v) => s + v, 0) / total) * 100);
+return { top1_share_pct: topShare(1), top3_share_pct: topShare(3), ... };
+```
+
+**Call sites to update:**
+- `analyze_candidate_profile` (~line 167): field names change; remove any manual `× 100` if present
+- `analyze_party_profile` (~line 244): same
+- `analyze_geographic_concentration` (~lines 690–692): currently does `pct(conc.top1_share * 100)` — after fix, change to `conc.top1_share_pct` (no multiplication)
+
+**Regression test update:** `BUG-5` describe block — update to assert new field names and that values are > 1 (clearly a percentage).
+
+- [ ] Refactor `concentrationMetrics()` return values in `analytics/index.ts`
+- [ ] Update all three call sites
+- [ ] Update `bugs.regression.test.ts` BUG-5 block
+
+---
+
+### Step 4: BUG-3 — Fix `find_exposed_vote_pools` misleading "lost votes" (🔴 Critical)
+
+**File:** `src/tools/strategic/index.ts:203–214`
+
+**Change:**
+```typescript
+// Before:
+const totalLostVotes = exposed.reduce(
+  (s, a) => s + ((a.votes_year1 ?? 0) - (a.votes_year2 ?? 0)),
+  0
+);
+// ...
+total_estimated_lost_votes: totalLostVotes,
+
+// After:
+const netVoteCountChange = exposed.reduce(
+  (s, a) => s + ((a.votes_year2 ?? 0) - (a.votes_year1 ?? 0)),
+  0
+);
+const totalSharePointsLost = exposed.reduce(
+  (s, a) => s + ((a.share_year1 ?? 0) - (a.share_year2 ?? 0)),
+  0
+);
+// ...
+net_vote_count_change_in_exposed_areas: netVoteCountChange,   // positive = gained raw votes; negative = lost
+total_share_points_lost_in_exposed_areas: round2(totalSharePointsLost),
+```
+
+Note: `netVoteCountChange` uses year2 − year1 (positive = gained), which is less misleading than year1 − year2. Add a `note` field clarifying sign convention.
+
+**Regression test update:** `BUG-3` describe block — assert new field names; verify `net_vote_count_change` is positive when turnout rose.
+
+- [ ] Fix `strategic/index.ts:203–214`
+- [ ] Update `bugs.regression.test.ts` BUG-3 block
+
+---
+
+### Step 5: BUG-9 — Fix `c3_size` to use actual electorate size (🔵 Low, prerequisite for BUG-4)
+
+**File:** `src/tools/strategic/index.ts:457–458`
+
+**Change:** `allVotesByArea` is already computed correctly at lines 420–424 but not used. Wire it in:
+
+```typescript
+// Before:
+const c3_size = maxVotes > 0 ? r.votes / maxVotes : 0;
+
+// After:
+const maxTotalVotes = Math.max(...Array.from(allVotesByArea.values()), 1);
+const c3_size = (allVotesByArea.get(r.area_id) ?? 0) / maxTotalVotes;
+```
+
+Update `scoring_methodology` description: `"c3_size: electorate size (total votes cast in area / largest area total)"`.
+
+**Regression test update:** `BUG-9` describe block — update to assert c3 now uses total votes, not party votes.
+
+- [ ] Fix `strategic/index.ts:457–458` and update `scoring_methodology` description
+- [ ] Update `bugs.regression.test.ts` BUG-9 block
+
+---
+
+### Step 6: BUG-4 — Remove anti-correlated c4; redistribute weights (🟠 High)
+
+**File:** `src/tools/strategic/index.ts:446–472`
+
+**Decision:** Remove c4 entirely. c1 and c4 are mathematically identical (c4 = 1 − c1), so c4 adds zero independent information. A 3-component model is more honest.
+
+**New weights (must sum to 1.0):**
+- c1_current_support: `0.40` (up from 0.35)
+- c2_trend: `0.35` (up from 0.25)
+- c3_size: `0.25` (up from 0.20)
+
+**Change:**
+```typescript
+// Remove c4 computation entirely.
+// Update composite:
+const score = round2(0.40 * c1 + 0.35 * c2 + 0.25 * c3_size);
+
+// Update scoring_methodology output:
+scoring_methodology: {
+  components: 3,
+  c1_current_support: { weight: 0.40, description: 'Party share relative to national (capped at 2×)' },
+  c2_trend: { weight: 0.35, description: 'Vote share change trend (±10pp scale)' },
+  c3_size: { weight: 0.25, description: 'Electorate size (total votes / largest area total)' },
+  note: 'c4 (upside) removed in Phase 19: it was mathematically identical to 1 − c1 and added no independent information.',
+}
+```
+
+**Regression test update:** `BUG-4` describe block — add assertion that the 3-component formula produces correct values; remove or comment out the c4 anti-correlation tests (they document a fixed bug).
+
+- [ ] Remove c4 from `strategic/index.ts`; update score formula and `scoring_methodology`
+- [ ] Update `bugs.regression.test.ts` BUG-4 block
+
+---
+
+### Step 7: BUG-8 — Add magnitude threshold to co-movement classification (🟡 Medium)
+
+**File:** `src/tools/strategic/index.ts:319–322`
+
+**Change:**
+```typescript
+// Before:
+co_movement: (loser_change !== null && gainer_change !== null)
+  ? (loser_change < 0 && gainer_change > 0 ? 'consistent_with_transfer' : 'inconsistent')
+  : 'insufficient_data',
+
+// After (min_votes threshold + proportionality check):
+co_movement: (loser_change !== null && gainer_change !== null)
+  ? (
+      loser_change < 0 &&
+      gainer_change > 0 &&
+      Math.abs(loser_change) >= MIN_TRANSFER_VOTES &&
+      gainer_change >= 0.1 * Math.abs(loser_change)
+        ? 'consistent_with_transfer'
+        : 'inconsistent'
+    )
+  : 'insufficient_data',
+```
+
+Add `const MIN_TRANSFER_VOTES = 50;` as a module-level constant (not a user parameter — keep the tool interface stable). This filters out noise cases where 1–2 vote changes are classified as transfer evidence.
+
+**Regression test update:** `BUG-8` describe block — the `[CURRENTLY FAILING]` tests now become the passing behavior.
+
+- [ ] Fix `strategic/index.ts:319–322`; add `MIN_TRANSFER_VOTES` constant
+- [ ] Update `bugs.regression.test.ts` BUG-8 block
+
+---
+
+### Step 8: BUG-6 — Add warning when `analyze_candidate_profile` uses fallback vote sum (🟡 Medium)
+
+**File:** `src/tools/analytics/index.ts:119,127`
+
+**Change:** When the vaalipiiri-level aggregate row is missing and the code falls back to summing äänestysalue rows, add a `data_warning` field to the output:
+
+```typescript
+const vpRow = candidateRows.find((r) => r.area_level === 'vaalipiiri');
+const usingFallback = !vpRow;
+const totalVotes = vpRow?.votes ?? candidateRows
+  .filter((r) => r.area_level === 'aanestysalue')
+  .reduce((s, r) => s + r.votes, 0);
+
+// In output:
+...(usingFallback ? {
+  data_warning: 'total_votes reconstructed by summing äänestysalue rows — vaalipiiri aggregate not found. May be incomplete if not all äänestysalue rows were loaded.'
+} : {}),
+```
+
+No regression test needed (no existing test covers this path).
+
+- [ ] Fix `analytics/index.ts:119,127`
+
+---
+
+### Step 9: BUG-7 — Document Pedersen inflation from party structural changes (🟡 Medium)
+
+**File:** `src/tools/area/index.ts` — `analyze_area_volatility` and `get_area_profile` Pedersen output blocks
+
+**Change:** Add a `method_note` field to both tool outputs:
+
+```typescript
+method_note: 'Pedersen index is computed from party_id keys. Party splits, mergers, or renames (e.g. SMP→PS 1995, Sini split 2017) create "ghost" volatility — the old party appears to go to 0 and the new one appears from 0. Elections spanning these structural changes will show inflated volatility that reflects label changes, not voter movement.',
+```
+
+No code logic changes — documentation only.
+
+- [ ] Add `method_note` to `analyze_area_volatility` output in `area/index.ts`
+- [ ] Add `method_note` to `get_area_profile` volatility section in `area/index.ts`
+
+---
+
+### Step 10: BUG-10 — Detect diacritic normalization collisions (🔵 Low)
+
+**File:** `src/tools/strategic/index.ts` — `detect_inactive_high_vote_candidates`, `normalizeCandidateName`
+
+**Change:** After building the `toYearMap` (normalized name → candidate), detect cases where two distinct raw names normalize to the same key:
+
+```typescript
+// After building toYearNames array:
+const normalizedNames = toYearNames.map(normalizeCandidateName);
+const seen = new Set<string>();
+const collisions = new Set<string>();
+for (const n of normalizedNames) {
+  if (seen.has(n)) collisions.add(n);
+  seen.add(n);
+}
+// In output:
+...(collisions.size > 0 ? {
+  name_normalization_warning: `${collisions.size} normalized name collision(s) detected — distinct candidates share the same normalized form (e.g. Mäki vs Maki). Inactive/active status for these candidates may be incorrect.`,
+} : {}),
+```
+
+**Regression test update:** `BUG-10` describe block — add assertion that the collision detection fires on the Mäki/Maki case.
+
+- [ ] Fix `strategic/index.ts` — add collision detection after `toYearMap` construction
+- [ ] Update `bugs.regression.test.ts` BUG-10 block
+
+---
+
+### Step 11: Remove resolved bug caveats from `audit/index.ts`
+
+Once BUG-1 and BUG-2 fixes are in place:
+- Remove `bug_share_of_party_vote_ratio` entry (lines 225–231) from the caveat registry
+- Remove `bug_party_analysis_double_counts` entry (lines 232–238) from the caveat registry
+- Update `get_data_caveats` tool description string if it mentions these by name
+
+- [ ] Remove BUG-1 and BUG-2 caveat entries from `audit/index.ts`
+
+---
+
+### Step 12: Update regression test suite
+
+All `[CURRENTLY FAILING]` labels in `bugs.regression.test.ts` describe **buggy** behavior. After fixes, these tests will fail because the code no longer behaves that way. Update each:
+
+- **BUG-1**: Replace "buggy formula returns ratio" test with assertion that `analytics/index.ts:96` now produces a percentage
+- **BUG-2**: Replace "buggy approach sums vaalipiiri" test with assertion that kunta-only filter produces correct total
+- **BUG-3**: Update field names (`net_vote_count_change_in_exposed_areas`, `total_share_points_lost_in_exposed_areas`)
+- **BUG-4**: Remove c4 anti-correlation tests (c4 no longer exists); add 3-component weight verification
+- **BUG-5**: Update field names to `_pct` variants; update `toBeLessThan(1)` to `toBeGreaterThan(1)`
+- **BUG-8**: Verify noise cases are now classified `'inconsistent'`
+- **BUG-9**: Verify c3 now uses `allVotesByArea` total
+- **BUG-10**: Verify collision detection fires
+
+- [ ] Update `bugs.regression.test.ts` to assert correct post-fix behavior throughout
+
+---
+
+### Step 13: Build + test
+
+- [x] `npm run build` — no TypeScript errors
+- [x] `npm test` — 96/96 tests pass (5 new regression tests added)
+- [x] Logbook entry
+
+---
+
+## Phase 20: Critical Security Fixes ✅ COMPLETE
+
+**Goal:** Close the critical and high-severity security vulnerabilities identified in `audits/SECURITY_AUDIT_2026-03.md`. All items are in `server-http.ts` or `normalizer.ts`. No tool interface changes.
+
+**Reference:** `BACKLOG.md` — NEW-SEC-1/2/3/4/6/9/10
+
+**Test plan:** `npm run build` + `npm test` after each fix; manual smoke test of rate limiter via curl.
+
+---
+
+### Step 1: NEW-SEC-2 — Fix X-Forwarded-For unconditional trust (🔴 Critical)
+
+**File:** `src/server-http.ts` — `getClientIp()` function
+
+**Issue:** Rate limiter accepts any `X-Forwarded-For` header value from any client, enabling trivial bypass by spoofing the header. A client can rotate IPs and never hit the 30 req/60s limit.
+
+**Fix:** Only trust `X-Forwarded-For` when the actual socket IP is a known trusted proxy (loopback or RFC-1918 range). Otherwise fall back to `req.socket.remoteAddress`.
+
+```typescript
+const TRUSTED_PROXY_RANGES = ['127.0.0.1', '::1', '::ffff:127.0.0.1'];
+const isTrustedProxy = (ip: string) =>
+  TRUSTED_PROXY_RANGES.includes(ip) ||
+  /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/.test(ip);
+
+function getClientIp(req: IncomingMessage): string {
+  const socketIp = req.socket.remoteAddress ?? '0.0.0.0';
+  if (isTrustedProxy(socketIp)) {
+    const xff = req.headers['x-forwarded-for'];
+    if (typeof xff === 'string') return xff.split(',')[0].trim();
+  }
+  return socketIp;
+}
+```
+
+- [ ] Fix `getClientIp()` in `server-http.ts`
+- [ ] Add trusted proxy range check
+
+---
+
+### Step 2: NEW-SEC-1 / SEC-8 — Prototype pollution via `Object.fromEntries` (🔴 Critical)
+
+**File:** `src/data/normalizer.ts`
+
+**Issue:** If PxWeb API returns a response with a key like `__proto__` or `constructor`, `Object.fromEntries` writes to `Object.prototype`, corrupting the runtime for all subsequent operations.
+
+**Fix:** Filter dangerous keys before passing to `Object.fromEntries`.
+
+```typescript
+const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+const safeFromEntries = <V>(entries: [string, V][]): Record<string, V> =>
+  Object.fromEntries(entries.filter(([k]) => !FORBIDDEN_KEYS.has(k)));
+```
+
+Replace all `Object.fromEntries(...)` calls in `normalizer.ts` with `safeFromEntries(...)`.
+
+- [ ] Add `safeFromEntries()` helper to `normalizer.ts`
+- [ ] Replace all `Object.fromEntries` call sites
+
+---
+
+### Step 3: NEW-SEC-3 — Add request body size limit (🟠 High)
+
+**File:** `src/server-http.ts` — request body accumulation
+
+**Issue:** No maximum body size — a client can send an arbitrarily large POST body and exhaust memory.
+
+**Fix:** Reject requests where accumulated body exceeds 1 MB (1,048,576 bytes).
+
+```typescript
+const MAX_BODY_BYTES = 1_048_576; // 1 MB
+// In body accumulation loop:
+if (body.length > MAX_BODY_BYTES) {
+  res.writeHead(413, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ error: 'Request body too large' }));
+  return;
+}
+```
+
+- [ ] Add body size guard to `server-http.ts`
+
+---
+
+### Step 4: NEW-SEC-4 — Add security response headers (🟠 High)
+
+**File:** `src/server-http.ts`
+
+**Issue:** No security headers — missing `X-Content-Type-Options`, `X-Frame-Options`, `Content-Security-Policy`.
+
+**Fix:** Add headers to all responses via a helper called at the start of each request handler.
+
+```typescript
+function setSecurityHeaders(res: ServerResponse): void {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Content-Security-Policy', "default-src 'none'");
+}
+```
+
+- [ ] Add `setSecurityHeaders()` and call it on every response
+
+---
+
+### Step 5: NEW-SEC-9 — Validate `CACHE_FILE` env var path (🟠 High)
+
+**File:** Cache initialization code (wherever `CACHE_FILE` env var is read)
+
+**Issue:** If `CACHE_FILE` is set to an absolute path outside the project directory (e.g. `/etc/passwd`), the service will write there without validation.
+
+**Fix:** Resolve the path and assert it starts with the expected cache directory (or is a relative path).
+
+```typescript
+const rawCachePath = process.env.CACHE_FILE ?? 'cache-store.json';
+const resolvedPath = path.resolve(rawCachePath);
+const expectedDir = path.resolve('.');
+if (!resolvedPath.startsWith(expectedDir + path.sep) && !resolvedPath.startsWith(expectedDir)) {
+  throw new Error(`CACHE_FILE path escapes project directory: ${resolvedPath}`);
+}
+```
+
+- [ ] Add path validation when `CACHE_FILE` env var is consumed
+
+---
+
+### Step 6: NEW-SEC-10 — Sanitize user query in error messages (🟠 High)
+
+**File:** `src/server-http.ts`, tool files with `catch` blocks
+
+**Issue:** Raw user input (tool arguments) echoed verbatim into error messages creates a prompt injection surface — a crafted query string can manipulate LLM context downstream.
+
+**Fix:** Truncate and strip control characters from any user input that appears in error output. Max 200 chars.
+
+```typescript
+const sanitizeForLog = (s: unknown): string =>
+  String(s).replace(/[\x00-\x1f\x7f]/g, '').slice(0, 200);
+```
+
+- [ ] Add `sanitizeForLog()` helper
+- [ ] Replace raw input in error messages with `sanitizeForLog(input)`
+
+---
+
+### Step 7: NEW-SEC-6 — Cache integrity validation on load (🟠 High)
+
+**File:** `src/cache/cache.ts` — disk cache load on startup
+
+**Issue:** Cached JSON file is loaded and parsed without any integrity check. A corrupted or tampered `cache-store.json` silently produces wrong results.
+
+**Fix:** Compute SHA-256 of the file on write; store hash alongside. On read, recompute hash and reject if mismatch (clear cache and start fresh).
+
+- [ ] Add hash-on-write, hash-check-on-read to `cache.ts`
+
+---
+
+### Step 8: Build + test
+
+- [ ] `npm run build` — no TypeScript errors
+- [ ] `npm test` — all tests pass
+- [ ] Commit: `Phase 20: critical security fixes (XFF, prototype pollution, body limit, headers, cache integrity)`
+- [ ] Push to GitHub
+- [ ] Logbook entry
+
+---
+
+## Phase 21: Critical Analytics Correctness ✅ COMPLETE
+
+**Goal:** Fix correctness bugs that affect analysis outputs: case-sensitive party matching (affects all tools), the potentially incomplete BUG-5 fix, the broken c2 trend normalization in `rank_areas_by_party_presence`, and the missing seat-outcome caveat on `rank_within_party`.
+
+**Reference:** `BACKLOG.md` — STAT-1, STAT-2, POL-7, POL-12, QUAL-2
+
+---
+
+### Step 1: STAT-1 — Fix `matchesParty` case-sensitivity (🟠 High)
+
+**File:** `src/tools/shared.ts` — `matchesParty()` function (and any inline `row.party_id === query` call sites)
+
+**Issue:** `matchesParty('kok', ...)` fails when stored `party_id = 'KOK'`. Affects all strategic and analytics tools when called from an LLM with lowercase input.
+
+**Fix:**
+```typescript
+// In matchesParty():
+const q = query.toLowerCase();
+return row.party_id?.toLowerCase() === q || row.party_name?.toLowerCase().includes(q);
+```
+
+- [ ] Fix `matchesParty()` in `shared.ts`
+- [ ] Search for inline `=== query` / `=== party` comparisons in tool files and lowercase them
+- [ ] Add test case to `shared.test.ts` for lowercase input matching uppercase `party_id`
+
+---
+
+### Step 2: STAT-2 — Verify BUG-5 fix covers all `concentrationMetrics()` callers (🟠 High)
+
+**File:** `src/tools/analytics/index.ts`
+
+**Issue:** Phase 19 fixed `concentrationMetrics()` to return `_pct` fields, but `analyze_candidate_profile` and `analyze_party_profile` may still reference old field names (`top1_share`, `top3_share`, etc.) and receive percentages they treat as fractions or vice versa.
+
+**Fix:**
+1. Search all references to `conc.top1_share`, `conc.top3_share`, `conc.top5_share`, `conc.top10_share` in `analytics/index.ts`
+2. Update each to `conc.top1_share_pct`, `conc.top3_share_pct`, etc.
+3. Remove any manual `× 100` multiply that was compensating for the old fraction output
+
+- [ ] Audit all callers of `concentrationMetrics()` in `analytics/index.ts`
+- [ ] Update field references to `_pct` variants at all call sites
+- [ ] Add assertions in test that `analyze_candidate_profile` concentration values are > 1 (percentages)
+
+---
+
+### Step 3: POL-7 — Fix c2 trend normalization scale (🔴 Critical)
+
+**File:** `src/tools/strategic/index.ts` — `rank_areas_by_party_presence`, c2 computation
+
+**Issue:** Current formula: `c2 = Math.min(1, Math.max(0, 0.5 + trendPp / 20))` uses ±10pp scale. Finnish area-level swings are typically ±1–3pp, so all real-world variation compresses into a 0.45–0.65 range — c2 effectively contributes only noise.
+
+**Fix:** Replace fixed scale with percentile rank across the actual distribution of trend values for this party/election pair.
+
+```typescript
+// After computing trendPp for each area, collect all trend values:
+const trendValues = results.map(r => r.trendPp).sort((a, b) => a - b);
+// Then for each area:
+const rank = trendValues.filter(t => t <= area.trendPp).length;
+const c2 = trendValues.length > 1 ? (rank - 1) / (trendValues.length - 1) : 0.5;
+```
+
+Update `scoring_methodology.c2_trend.description` to reflect percentile-rank method.
+
+- [ ] Replace fixed ±10pp c2 formula with percentile rank
+- [ ] Update `scoring_methodology` description
+- [ ] Update Phase 19 `BUG-4` regression tests if they assumed fixed-scale c2 behavior
+
+---
+
+### Step 4: POL-12 — Add seat-outcome caveat to `rank_within_party` outputs (🔴 Critical)
+
+**Files:** All tools that output `rank_within_party`: `analytics/index.ts`, `retrieval/index.ts`
+
+**Issue:** A candidate ranked #1 within their party may or may not have won a seat — depends on party list size, d'Hondt allocation, thresholds. No seat data exists in the MCP at all. Without an explicit caveat, consumers will interpret rank as outcome.
+
+**Fix:** Add a `rank_caveat` field alongside every `rank_within_party` output:
+
+```typescript
+rank_within_party_caveat: 'Intra-party ranking only. Does not indicate election outcome or seat allocation — seat distribution depends on party total votes and d\'Hondt divisor calculation, which this service does not model.'
+```
+
+Alternatively, add it once to the `method` block of each affected tool.
+
+- [ ] Add `rank_within_party_caveat` to `analyze_candidate_profile` output
+- [ ] Add `rank_within_party_caveat` to `analyze_within_party_position` output
+- [ ] Add `rank_within_party_caveat` to `get_rankings` / `get_top_n` output
+- [ ] Add caveat to `get_data_caveats` registry in `audit/index.ts`
+
+---
+
+### Step 5: QUAL-2 — Register open POL-series issues in `get_data_caveats` (🟠 High)
+
+**File:** `src/tools/audit/index.ts` — caveat registry
+
+**Issue:** The most analytically dangerous open issues (POL-7, POL-12, unresolved framing issues) are not surfaced by `get_data_caveats`. LLM consumers have no way to know these limitations exist.
+
+**Fix:** Add caveat entries for:
+- `rank_within_party_no_seat_data` (🔴 Critical) — scope: `candidate`
+- `c2_trend_percentile_scale` (🟠 High) — scope: `strategic`
+- `pedersen_period_length` (🟠 High) — scope: `area`
+- `compare_across_elections_eu_second_order` (🟡 Medium) — scope: `cross_election`
+
+- [ ] Add 4 caveat entries to `audit/index.ts`
+
+---
+
+### Step 6: Build + test
+
+- [ ] `npm run build` — no TypeScript errors
+- [ ] `npm test` — all tests pass
+- [ ] Commit: `Phase 21: analytics correctness — STAT-1, STAT-2, POL-7, POL-12, QUAL-2`
+- [ ] Push to GitHub
+- [ ] Logbook entry
+
+---
+
+## Phase 22: Robustness & Error Handling ✅ COMPLETE
+
+**Goal:** Eliminate silent failure modes: silent catch blocks, missing API response validation, and broken entity matching for short strings.
+
+**Reference:** `BACKLOG.md` — FUNC-5, FUNC-6, FUNC-7
+
+---
+
+### Step 1: FUNC-5 — Replace silent `catch (_)` blocks (🟠 High)
+
+**File:** `src/tools/retrieval/index.ts` and other tool files
+
+**Issue:** `catch (_) {}` swallows all errors silently. Callers receive empty/partial results with no indication that something went wrong.
+
+**Fix:** Replace with `catch (err) { console.error('[tool-name]', err); }` and where possible include a `data_warning` or `error` field in the returned object.
+
+- [ ] Find all `catch (_) {}` instances across `src/tools/`
+- [ ] Replace with logged catch + surface error in output where feasible
+
+---
+
+### Step 2: FUNC-6 — Runtime validation of PxWeb API responses (🟠 High)
+
+**File:** `src/api/pxweb-client.ts`, `src/data/normalizer.ts`
+
+**Issue:** If PxWeb changes its schema or returns an error payload in JSON, the normalizer silently produces empty/wrong rows with no indication of the failure.
+
+**Fix:** Add lightweight schema guards on raw API responses before passing to normalizer. Verify expected top-level fields (`columns`, `data`, etc.) are present and are the right types. Throw a descriptive error on mismatch.
+
+- [ ] Add response shape guards in `pxweb-client.ts` after `response.json()`
+- [ ] Add guard in `normalizer.ts` before processing `metadata.variables`
+
+---
+
+### Step 3: FUNC-7 — Fix `bigramSimilarity` for single-character inputs (🟡 Medium)
+
+**File:** Entity resolution code (wherever `bigramSimilarity` / `buildBigrams` is defined)
+
+**Issue:** A string of length 1 has 0 bigrams — score is 0/0 = 0. Single-character nicknames or initials never match anything.
+
+**Fix:** For strings shorter than 2 characters, fall back to exact match (score 1.0) or prefix match.
+
+```typescript
+if (a.length < 2 || b.length < 2) {
+  return a === b ? 1.0 : (b.startsWith(a) || a.startsWith(b) ? 0.5 : 0);
+}
+```
+
+- [ ] Add short-string fallback to bigram similarity function
+- [ ] Add test case: single-character input matching
+
+---
+
+### Step 4: Build + test
+
+- [ ] `npm run build` — no TypeScript errors
+- [ ] `npm test` — all tests pass
+- [ ] Commit: `Phase 22: robustness — silent catch, API validation, bigram short-string fix`
+- [ ] Push to GitHub
+- [ ] Logbook entry
+
+---
+
+## Phase 23: Political Science Framing Improvements ✅ COMPLETE
+
+**Goal:** Address the remaining POLSCI_AUDIT findings that affect analytical correctness without requiring breaking output changes. Mostly documentation, caveats, and minor output field additions.
+
+**Reference:** `BACKLOG.md` — POL-5, POL-6, POL-8, POL-9, POL-10, POL-11, POL-13, POL-14, POL-15, POL-16, STAT-3
+
+---
+
+### POL-6: Move caveats before results in `compare_across_elections`
+
+**File:** `src/tools/analytics/index.ts`
+
+Reorder output object so `caveats` and `comparability_notes` appear before `results[]`. Affects JSON key ordering.
+
+- [ ] Reorder output fields in `compare_across_elections`
+
+---
+
+### POL-8: Add `pedersen_per_cycle` to volatility outputs
+
+**Files:** `src/tools/area/index.ts`, `src/tools/analytics/index.ts`
+
+Add `years_between` (computed from election years) and `pedersen_per_cycle` (= `pedersen_index / (years_between / 4)`) so consumers can compare volatility across different-length inter-election periods.
+
+- [ ] Add `years_between` and `pedersen_per_cycle` to `analyze_area_volatility` output
+- [ ] Add to `get_area_profile` Pedersen section
+
+---
+
+### POL-9 / STAT-4: Fix `vote_share_change_pp` rounding artifact
+
+**File:** relevant analytics tools
+
+Compute change from raw vote counts (`(votes2 / total2 - votes1 / total1) * 100`) before rounding, not from already-rounded `pct()` values.
+
+- [ ] Identify all `vote_share_change_pp` computation sites
+- [ ] Fix to derive from raw values, round at output
+
+---
+
+### POL-10: Contextualise `find_area_overperformance` by area size
+
+**File:** `src/tools/analytics/index.ts`
+
+Add `area_electorate_votes` field to overperformance rows so consumers know whether a 5pp overperformance is in a 500-voter or a 50,000-voter area.
+
+- [ ] Add `area_total_votes` to overperformance output rows
+
+---
+
+### POL-11: Filter micro-parties from `biggest_gainer`
+
+**File:** `src/tools/area/index.ts`
+
+Add a minimum absolute vote threshold (e.g. ≥ 1% national share, or ≥ 100 votes) before qualifying a party as `biggest_gainer` / `biggest_loser`.
+
+- [ ] Add minimum threshold to `biggest_gainer` / `biggest_loser` computation
+
+---
+
+### POL-13: Expand EU caveat in `compare_across_elections`
+
+**File:** `src/tools/analytics/index.ts`
+
+Add turnout ratio quantification and note on second-order election dynamics (Reif & Schmitt 1980) to the EU caveat block.
+
+- [ ] Expand EU caveat text
+
+---
+
+### POL-14: Quantify municipal expanded electorate caveat
+
+**File:** `src/tools/analytics/index.ts`
+
+When `election_type = 'municipal'` is compared with `'parliamentary'`, add a caveat noting that municipal elections include all residents 18+ (including non-citizens) while parliamentary is citizens-only.
+
+- [ ] Add quantified caveat for municipal/parliamentary cross-comparison
+
+---
+
+### POL-15: Verify `subnatLevel` for EU elections
+
+**File:** `src/tools/shared.ts` — `subnatLevel()` function
+
+Verify that `subnatLevel('eu')` returns the correct level (currently returns `'vaalipiiri'` — may need to return `'national'` since Finland is a single EU constituency).
+
+- [ ] Verify and correct `subnatLevel('eu')`
+- [ ] Update test in `shared.test.ts`
+
+---
+
+### POL-16: Name specific Finnish party discontinuities in Pedersen note
+
+**File:** `src/tools/area/index.ts`
+
+The current `pedersen_method_note` mentions party splits/mergers generically. Name the specific events: SMP→PS (1995 election), Sini split (2017, appears in 2019 results), SKL→KD (2001).
+
+- [ ] Update `pedersen_method_note` text with specific party/year events
+
+---
+
+### STAT-3: Clamp histogram last bucket to actual max
+
+**File:** `src/tools/analytics/index.ts` — `analyze_vote_distribution`
+
+The last histogram bucket's `to` field should equal `max` (the actual data maximum), not the arithmetically computed bucket boundary.
+
+- [ ] Clamp last bucket `to` to actual data max
+
+---
+
+### POL-5: Add survivorship bias note to `get_area_profile`
+
+**File:** `src/tools/area/index.ts`
+
+Add a `trend_caveat` field noting that historical trend averages exclude candidates who left politics — the trend skews toward more successful candidates.
+
+- [ ] Add `trend_caveat` to `get_area_profile` historical section
+
+---
+
+### Step final: Build + test
+
+- [ ] `npm run build` — no TypeScript errors
+- [ ] `npm test` — all tests pass
+- [ ] Commit: `Phase 23: PolSci framing — POL-5/6/8/9/10/11/13/14/15/16, STAT-3`
+- [ ] Push to GitHub
+- [ ] Logbook entry
+
+---
+
+## Phase 24: Efficiency & Infrastructure ✅ COMPLETE
+
+**Goal:** Address remaining efficiency, security-medium, and code quality items that don't fit earlier phases.
+
+**Reference:** `BACKLOG.md` — NEW-SEC-7/8, COST-3, QUAL-6, EFF-2 (verify), TLS
+
+---
+
+### NEW-SEC-7: Add structured access logging
+
+Log each tool call with: timestamp, tool name, sanitized query params, IP, response status, duration. Useful for debugging and future abuse detection.
+
+- [x] Add access log to `server-http.ts` request handler — body chunks collected via EventEmitter broadcast alongside transport; log format: `ISO METHOD URL status Xms ip=Y tool=Z args=W`
+
+---
+
+### NEW-SEC-8: Document multi-instance rate limit limitation
+
+The in-memory rate limiter is per-process. Document in `CLAUDE.md` and `server-http.ts` comments that horizontal scaling requires external state (Redis). No code change needed until deployment scales.
+
+- [x] Add comment in `server-http.ts` near rate limiter
+- [x] Add note to `CLAUDE.md` deployment section
+
+---
+
+### COST-3: Reduce cache key redundancy in `compare_elections`
+
+Each year in `compare_elections` triggers a separate API call with a year-specific cache key. Investigate whether the 13sw table (all years in one table) can be fetched once and sliced for multiple years.
+
+- [x] Investigated: each `loadPartyResults` call fetches one year via PxWeb `Vuosi` filter, cached as `data:13sw:parliamentary:YEAR:all`. Bulk-fetch optimization would require significant architectural change to `loaders.ts`. Deferred to BACKLOG — no code change.
+
+---
+
+### EFF-2: Verify `compare_candidates` fix from Phase 18
+
+Phase 18 logged EFF-2 as fixed (pre-built `Map<candidateId, rank>`). Verify the fix is in place; remove from backlog if confirmed.
+
+- [x] Confirmed: `compare_candidates` line 254 builds `rankMap = new Map(...)` and uses `rankMap.get(cid)` — O(1). No fix needed.
+
+---
+
+### QUAL-6: Audit system prompt against registered election tables
+
+The system prompt's data coverage section may be stale. Compare it against `election-tables.ts` `ALL_ELECTION_TABLES` entries.
+
+- [x] No system prompt file exists in-repo. The system prompt is registered as a MCP prompt at runtime via `server.registerPrompt()`. In-tree audit is not possible; cross-reference must be done via live server. Deferred to Phase 26 live tests.
+
+---
+
+### Step final: Build + test
+
+- [x] `npm run build` — clean
+- [x] `npm test` — 101/101 passed
+- [x] Commit `d4c5e6a`: `Phase 24: efficiency and infrastructure cleanup`
+- [x] Push to GitHub
+- [x] Logbook entry
+
+---
+
+## Phase 25: Backlog Audit Closure ✅ COMPLETE
+
+**Goal:** Close all open BACKLOG items that can be resolved without a live server. Add remaining items to the plan. Verify or fix each item.
+
+**Reference:** `BACKLOG.md` — STAT-2, POL-10, NEW-SEC-5, COST-3, QUAL-6
+
+---
+
+### STAT-2: Verify `concentrationMetrics()` callers use correct `_pct` field names
+
+Concern: Phase 19 fixed `concentrationMetrics()` to return `_pct` fields, but callers in `analyze_candidate_profile` and `analyze_party_profile` may still reference old names (`top1_share` etc.).
+
+- [x] **Verdict: false alarm.** All callers (`analyze_candidate_profile` line 125, `analyze_party_profile` line 204, `analyze_geographic_concentration` lines 672/700) embed the whole `concentration` object directly into the response without destructuring. Since `concentrationMetrics()` returns `_pct` field names, the output is correct. No code change needed.
+
+---
+
+### POL-10: `find_area_underperformance` missing `area_total_votes` field
+
+`find_area_overperformance` already added `area_total_votes` to each row (Phase 23). `find_area_underperformance` was missing it — inconsistent with its symmetric counterpart.
+
+- [x] Added `area_total_votes` to both party and candidate branches of `find_area_underperformance` (`analytics/index.ts`). Area totals computed from same row set as overperformance to ensure consistency.
+
+---
+
+### NEW-SEC-5: No TLS
+
+Service runs plain HTTP. TLS must be terminated at the infrastructure level (reverse proxy, Cloudflare, Azure App Service TLS offload).
+
+- [x] Out of scope for this codebase. No application-layer change possible or appropriate. Documented in `CLAUDE.md` deployment section. Remains an infrastructure concern for deployment.
+
+---
+
+### COST-3 / QUAL-6: Already assessed
+
+- [x] COST-3 — deferred architectural change. Documented in Phase 24.
+- [x] QUAL-6 — no in-repo system prompt file. Deferred to Phase 26 live tests.
+
+---
+
+### Step final: Build + test
+
+- [x] `npm run build` — clean
+- [x] `npm test` — all tests pass
+- [x] Commit: `Phase 25: backlog audit closure`
+- [x] Push to GitHub
+- [x] Logbook entry
+
+---
+
+## Phase 26: Integration Tests & Live Validation ⬜ PLANNED
+
+**Goal:** Validate the full system end-to-end with a running MCP server against real election data. Also audit the registered MCP system prompt against `election-tables.ts` (QUAL-6 deferred from Phase 25).
+
+**Reference:** `BACKLOG.md` — Phase 15 live test, Phase 16 system prompt test, QUAL-6
+
+---
+
+### Phase 15 live test: `compare_across_elections` SDP
+
+Run against a live server:
+```
+compare_across_elections SDP [municipal 2021, parliamentary 2023, regional 2025]
+```
+Expected:
+- Three result rows with plausible vote shares
+- Cross-type caveat present
+- Municipal national-share note present
+
+- [ ] Start MCP server
+- [ ] Run query via MCP client or Claude Desktop
+- [ ] Verify output structure and values
+
+---
+
+### Phase 16: Claude Desktop system prompt test
+
+Connect MCP server to Claude Desktop using the registered `system` prompt. Run a realistic analyst workflow:
+1. Resolve a candidate
+2. Get their profile
+3. Compare their party across elections
+4. Get strategic area ranking
+
+- [ ] Connect Claude Desktop to local MCP server
+- [ ] Run full analyst workflow
+- [ ] Document any tool errors, missing data, or misleading outputs
+- [ ] Create BACKLOG items for any issues found
+
+---
+
+### Step final
+
+- [ ] Logbook entry with live test results
+- [ ] Commit any fixes found during live testing
+- [ ] Push to GitHub
