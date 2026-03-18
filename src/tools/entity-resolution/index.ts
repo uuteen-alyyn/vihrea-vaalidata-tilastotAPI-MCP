@@ -7,78 +7,20 @@ import {
   getDatabasePath,
 } from '../../data/election-tables.js';
 import type { ElectionType } from '../../data/types.js';
-
-// ─── Fuzzy matching utilities ────────────────────────────────────────────────
-
-function normalizeStr(s: string): string {
-  return s
-    .toLowerCase()
-    .trim()
-    .replace(/ä/g, 'a')
-    .replace(/å/g, 'a')
-    .replace(/ö/g, 'o')
-    .replace(/ü/g, 'u')
-    .replace(/[^\w\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function buildBigrams(s: string): Set<string> {
-  const set = new Set<string>();
-  for (let i = 0; i < s.length - 1; i++) set.add(s.slice(i, i + 2));
-  return set;
-}
-
-/**
- * Dice-coefficient bigram similarity.
- * For strings shorter than 2 chars, bigrams are undefined — falls back to
- * exact match (1.0) or prefix match (0.5) to avoid a spurious 0 score for
- * single-character queries/nicknames (FUNC-7).
- */
-function bigramSimilarity(a: string, aSet: Set<string>, b: string): number {
-  if (a.length < 2 || b.length < 2) {
-    if (a === b) return 1.0;
-    if (b.startsWith(a) || a.startsWith(b)) return 0.5;
-    return 0;
-  }
-  if (aSet.size === 0) return 0;
-  const bSet = buildBigrams(b);
-  if (bSet.size === 0) return 0;
-  let intersection = 0;
-  for (const bg of aSet) if (bSet.has(bg)) intersection++;
-  return (2 * intersection) / (aSet.size + bSet.size);
-}
-
-function scoreMatch(query: string, candidate: string): number {
-  const qLow = query.toLowerCase().trim();
-  const cLow = candidate.toLowerCase().trim();
-  if (qLow === cLow) return 1.0;
-  const qNorm = normalizeStr(query);
-  const cNorm = normalizeStr(candidate);
-  if (qNorm === cNorm) return 0.95;
-  if (cLow.startsWith(qLow) || cLow.includes(` ${qLow}`) || cLow.includes(`${qLow} `)) return 0.88;
-  if (cNorm.startsWith(qNorm) || cNorm.includes(qNorm)) return 0.82;
-  return bigramSimilarity(qNorm, buildBigrams(qNorm), cNorm);
-}
-
-/** Pre-computed scorer for batch candidate loops — avoids rebuilding query bigrams on every iteration. */
-function scoreMatchFast(
-  qLow: string, qNorm: string, qBigrams: Set<string>,
-  cLow: string, cNorm: string,
-): number {
-  if (qLow === cLow) return 1.0;
-  if (qNorm === cNorm) return 0.95;
-  if (cLow.startsWith(qLow) || cLow.includes(` ${qLow}`) || cLow.includes(`${qLow} `)) return 0.88;
-  if (cNorm.startsWith(qNorm) || cNorm.includes(qNorm)) return 0.82;
-  return bigramSimilarity(qNorm, qBigrams, cNorm);
-}
-
-function confidenceLabel(score: number): 'exact' | 'high' | 'medium' | 'low' {
-  if (score >= 0.95) return 'exact';
-  if (score >= 0.8) return 'high';
-  if (score >= 0.55) return 'medium';
-  return 'low';
-}
+import {
+  normalizeStr,
+  buildBigrams,
+  bigramSimilarity,
+  scoreMatch,
+  scoreMatchFast,
+  confidenceLabel,
+} from '../../utils/fuzzy-match.js';
+import {
+  type CandidateEntry,
+  getCandidateListForUnit,
+  getCandidatesFromNationalTable,
+  getCandidatesAllUnits,
+} from '../../data/candidate-index.js';
 
 // ─── Party alias map ─────────────────────────────────────────────────────────
 // Maps normalized query → canonical party abbreviation used as valueText in PxWeb.
@@ -241,107 +183,8 @@ async function getAreaList(year = 2023): Promise<AreaEntry[]> {
   });
 }
 
-// ─── Candidate list builders ──────────────────────────────────────────────────
-
-interface CandidateEntry {
-  candidate_id: string;
-  candidate_name: string;
-  party: string;
-  vaalipiiri_name: string;
-  vaalipiiri_key: string;  // unit key: vaalipiiri, hyvinvointialue, or 'national'
-  table_id: string;
-}
-
-/** Load candidates from a per-unit table (parliamentary/municipal/regional). */
-async function getCandidateListForUnit(
-  year: number,
-  unitKey: string,
-  electionType: ElectionType
-): Promise<CandidateEntry[]> {
-  const tables = getElectionTables(electionType, year);
-  if (!tables?.candidate_by_aanestysalue) {
-    throw new Error(`No per-unit candidate tables for ${electionType} ${year}`);
-  }
-  const tableId = tables.candidate_by_aanestysalue[unitKey];
-  if (!tableId) throw new Error(`No candidate table for unit '${unitKey}' in ${electionType} ${year}`);
-  const dbPath = getDatabasePath(tables);
-  const metadata = await fetchMetadataCached(dbPath, tableId);
-  const candidateVar = metadata.variables.find((v) => v.code === 'Ehdokas');
-  if (!candidateVar) throw new Error('Ehdokas variable not found in candidate table metadata');
-
-  return candidateVar.values.map((code, i) => {
-    const text = candidateVar.valueTexts[i] ?? code;
-    const parts = text.split(' / ');
-    return {
-      candidate_id: code,
-      candidate_name: parts[0]?.trim() ?? text,
-      party: parts[1]?.trim() ?? '',
-      vaalipiiri_name: parts[2]?.trim() ?? unitKey,
-      vaalipiiri_key: unitKey,
-      table_id: tableId,
-    };
-  });
-}
-
-/**
- * Load candidates from the national table (EU parliament and presidential).
- * EU: 247 candidates, national totals (14gy). Presidential: all candidates (14d5).
- */
-async function getCandidatesFromNationalTable(
-  year: number,
-  electionType: ElectionType
-): Promise<CandidateEntry[]> {
-  const tables = getElectionTables(electionType, year);
-  if (!tables?.candidate_national) {
-    throw new Error(`No national candidate table for ${electionType} ${year}`);
-  }
-  const tableId = tables.candidate_national;
-  const dbPath = getDatabasePath(tables);
-  const metadata = await fetchMetadataCached(dbPath, tableId);
-  const candidateVar = metadata.variables.find((v) => v.code === 'Ehdokas');
-  if (!candidateVar) throw new Error('Ehdokas variable not found in national candidate table');
-
-  // Skip non-candidate summary codes (presidential: '00'=all, '11'=others)
-  const SKIP_CODES = new Set(['00', '11']);
-  const entries: CandidateEntry[] = [];
-  candidateVar.values.forEach((code, i) => {
-    if (SKIP_CODES.has(code)) return;
-    const text = candidateVar.valueTexts[i] ?? code;
-    const parts = text.split(' / ');
-    entries.push({
-      candidate_id: code,
-      candidate_name: parts[0]?.trim() ?? text,
-      party: parts[1]?.trim() ?? '',
-      vaalipiiri_name: 'national',
-      vaalipiiri_key: 'national',
-      table_id: tableId,
-    });
-  });
-  return entries;
-}
-
-/**
- * Load all candidates for any election type.
- * EU/presidential: fetches from single national table.
- * Parliamentary/municipal/regional: fans out to all unit tables in parallel.
- */
-async function getCandidatesAllUnits(
-  year: number,
-  electionType: ElectionType
-): Promise<CandidateEntry[]> {
-  if (electionType === 'eu_parliament' || electionType === 'presidential') {
-    return getCandidatesFromNationalTable(year, electionType);
-  }
-  const tables = getElectionTables(electionType, year);
-  if (!tables?.candidate_by_aanestysalue) {
-    throw new Error(`No candidate tables for ${electionType} ${year}`);
-  }
-  const keys = Object.keys(tables.candidate_by_aanestysalue);
-  const results = await Promise.all(keys.map((k) => getCandidateListForUnit(year, k, electionType)));
-  return results.flat();
-}
-
 // ─── Tool registration ────────────────────────────────────────────────────────
+// Candidate list builders moved to src/data/candidate-index.ts (shared module)
 
 export function registerEntityResolutionTools(server: McpServer): void {
 

@@ -1055,3 +1055,17 @@ Created `src/tools/comparison/index.ts` with `compare_across_dimensions` tool an
 **Files changed:** `src/tools/comparison/index.ts` (new), `src/server.ts` (registered, updated system prompt).
 
 **Build:** clean. **Tests:** 159/159 passed (no regressions).
+
+---
+
+## SHARED UTILS REFACTOR: fuzzy-match + candidate-index extraction — 2026-03-19 00:37:00
+
+Extracted code that was private to `entity-resolution/index.ts` into two shared modules, eliminating future duplication for Phase C5 (`scrape_candidate_trajectory`).
+
+**New files:**
+- `src/utils/fuzzy-match.ts` — All fuzzy matching: `normalizeStr`, `buildBigrams`, `bigramSimilarity`, `scoreMatch`, `scoreMatchFast`, `confidenceLabel`
+- `src/data/candidate-index.ts` — Candidate lookup builders: `CandidateEntry` interface, `getCandidateListForUnit`, `getCandidatesFromNationalTable`, `getCandidatesAllUnits`
+
+**`entity-resolution/index.ts`:** Updated imports to pull from the new shared modules; removed all private duplicate implementations. The file retains its own private `fetchMetadataCached` (needed only for `getAreaList` which has not been moved yet).
+
+**Build:** clean. **Tests:** 159/159 passed (no regressions).
