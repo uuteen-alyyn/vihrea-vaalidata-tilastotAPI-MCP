@@ -28,7 +28,7 @@ cd vihrea-vaalidata-tilastotAPI-MCP
 **2. Install dependencies and build**
 
 ```bash
-npm install
+npm ci
 npm run build
 ```
 

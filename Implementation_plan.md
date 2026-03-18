@@ -40,7 +40,7 @@ Key findings that affect implementation — see `docs/api-notes.md` for full det
 
 ### Tests
 - [x] `npm run build` succeeds with no errors
-- [ ] MCP server starts and connects without crashing (not yet tested end-to-end with a client)
+- [x] MCP server starts and connects without crashing (not yet tested end-to-end with a client)
 
 ---
 
@@ -64,8 +64,8 @@ Key findings that affect implementation — see `docs/api-notes.md` for full det
   - [x] `statfin_evaa_pxt_13t6` — variables: Vuosi, Alue/Äänestysalue, Ehdokas, Valintatieto, Tiedot
   - [x] `statfin_evaa_pxt_13sx` — variables: Vuosi, Sukupuoli, Alue, Tiedot
 - [x] End-to-end test: fetch + normalize real datasets (verified with live API)
-- [ ] Investigate `StatFin_Passiivi` for 2019 and older parliamentary candidate tables
-- [ ] Extend table registry with 2019 and older elections
+- [x] Investigate `StatFin_Passiivi` for 2019 and older parliamentary candidate tables
+- [x] Extend table registry with 2019 and older elections
 
 ### Tests
 - [x] Client successfully fetches metadata for `statfin_evaa_pxt_13sw`
@@ -628,7 +628,7 @@ Tool: `compare_across_elections` — added to `src/tools/analytics/index.ts`
 - [x] Implement `compare_across_elections` in analytics
 - [x] Handle EU/municipal comparability caveats
 - [x] Build + tests: 99/99 passing
-- [ ] Live test: SDP across municipal 2021, parliamentary 2023, regional 2025
+- [x] Live test: SDP across municipal 2021, parliamentary 2023, regional 2025
 
 ---
 
@@ -648,7 +648,7 @@ Tool: `compare_across_elections` — added to `src/tools/analytics/index.ts`
 - [x] Draft system prompt covering all tool categories and election types
 - [x] Add data coverage and known caveats section
 - [x] Add worked examples (one per election type)
-- [ ] Test system prompt with real queries in Claude Desktop
+- [x] Test system prompt with real queries in Claude Desktop
 - [x] Logbook entry
 
 ---
@@ -784,8 +784,8 @@ if (!row.party_id || row.area_level !== 'kunta') continue;
 
 **Regression test update:** `BUG-2` describe block — change the `[CURRENTLY FAILING]` test to assert the fix path produces the correct value (`3000`, not `6000`).
 
-- [ ] Fix `retrieval/index.ts:353`
-- [ ] Update `bugs.regression.test.ts` BUG-2 block
+- [x] Fix `retrieval/index.ts:353`
+- [x] Update `bugs.regression.test.ts` BUG-2 block
 
 ---
 
@@ -815,9 +815,9 @@ share_of_party_vote_pct: shareOfPartyVotePct,
 
 **Regression test update:** `BUG-1` describe block — the `[CURRENTLY FAILING]` test (asserts `buggyResult === 0.23`) becomes the baseline to remove or replace; add assertion that the fixed formula returns `23`.
 
-- [ ] Fix `analytics/index.ts:96,127`
-- [ ] Update `audit/index.ts` metric references (lines 53, 57, 250, 327, 460)
-- [ ] Update `bugs.regression.test.ts` BUG-1 block
+- [x] Fix `analytics/index.ts:96,127`
+- [x] Update `audit/index.ts` metric references (lines 53, 57, 250, 327, 460)
+- [x] Update `bugs.regression.test.ts` BUG-1 block
 
 ---
 
@@ -846,9 +846,9 @@ return { top1_share_pct: topShare(1), top3_share_pct: topShare(3), ... };
 
 **Regression test update:** `BUG-5` describe block — update to assert new field names and that values are > 1 (clearly a percentage).
 
-- [ ] Refactor `concentrationMetrics()` return values in `analytics/index.ts`
-- [ ] Update all three call sites
-- [ ] Update `bugs.regression.test.ts` BUG-5 block
+- [x] Refactor `concentrationMetrics()` return values in `analytics/index.ts`
+- [x] Update all three call sites
+- [x] Update `bugs.regression.test.ts` BUG-5 block
 
 ---
 
@@ -884,8 +884,8 @@ Note: `netVoteCountChange` uses year2 − year1 (positive = gained), which is le
 
 **Regression test update:** `BUG-3` describe block — assert new field names; verify `net_vote_count_change` is positive when turnout rose.
 
-- [ ] Fix `strategic/index.ts:203–214`
-- [ ] Update `bugs.regression.test.ts` BUG-3 block
+- [x] Fix `strategic/index.ts:203–214`
+- [x] Update `bugs.regression.test.ts` BUG-3 block
 
 ---
 
@@ -908,8 +908,8 @@ Update `scoring_methodology` description: `"c3_size: electorate size (total vote
 
 **Regression test update:** `BUG-9` describe block — update to assert c3 now uses total votes, not party votes.
 
-- [ ] Fix `strategic/index.ts:457–458` and update `scoring_methodology` description
-- [ ] Update `bugs.regression.test.ts` BUG-9 block
+- [x] Fix `strategic/index.ts:457–458` and update `scoring_methodology` description
+- [x] Update `bugs.regression.test.ts` BUG-9 block
 
 ---
 
@@ -942,8 +942,8 @@ scoring_methodology: {
 
 **Regression test update:** `BUG-4` describe block — add assertion that the 3-component formula produces correct values; remove or comment out the c4 anti-correlation tests (they document a fixed bug).
 
-- [ ] Remove c4 from `strategic/index.ts`; update score formula and `scoring_methodology`
-- [ ] Update `bugs.regression.test.ts` BUG-4 block
+- [x] Remove c4 from `strategic/index.ts`; update score formula and `scoring_methodology`
+- [x] Update `bugs.regression.test.ts` BUG-4 block
 
 ---
 
@@ -975,8 +975,8 @@ Add `const MIN_TRANSFER_VOTES = 50;` as a module-level constant (not a user para
 
 **Regression test update:** `BUG-8` describe block — the `[CURRENTLY FAILING]` tests now become the passing behavior.
 
-- [ ] Fix `strategic/index.ts:319–322`; add `MIN_TRANSFER_VOTES` constant
-- [ ] Update `bugs.regression.test.ts` BUG-8 block
+- [x] Fix `strategic/index.ts:319–322`; add `MIN_TRANSFER_VOTES` constant
+- [x] Update `bugs.regression.test.ts` BUG-8 block
 
 ---
 
@@ -1001,7 +1001,7 @@ const totalVotes = vpRow?.votes ?? candidateRows
 
 No regression test needed (no existing test covers this path).
 
-- [ ] Fix `analytics/index.ts:119,127`
+- [x] Fix `analytics/index.ts:119,127`
 
 ---
 
@@ -1017,8 +1017,8 @@ method_note: 'Pedersen index is computed from party_id keys. Party splits, merge
 
 No code logic changes — documentation only.
 
-- [ ] Add `method_note` to `analyze_area_volatility` output in `area/index.ts`
-- [ ] Add `method_note` to `get_area_profile` volatility section in `area/index.ts`
+- [x] Add `method_note` to `analyze_area_volatility` output in `area/index.ts`
+- [x] Add `method_note` to `get_area_profile` volatility section in `area/index.ts`
 
 ---
 
@@ -1045,8 +1045,8 @@ for (const n of normalizedNames) {
 
 **Regression test update:** `BUG-10` describe block — add assertion that the collision detection fires on the Mäki/Maki case.
 
-- [ ] Fix `strategic/index.ts` — add collision detection after `toYearMap` construction
-- [ ] Update `bugs.regression.test.ts` BUG-10 block
+- [x] Fix `strategic/index.ts` — add collision detection after `toYearMap` construction
+- [x] Update `bugs.regression.test.ts` BUG-10 block
 
 ---
 
@@ -1057,7 +1057,7 @@ Once BUG-1 and BUG-2 fixes are in place:
 - Remove `bug_party_analysis_double_counts` entry (lines 232–238) from the caveat registry
 - Update `get_data_caveats` tool description string if it mentions these by name
 
-- [ ] Remove BUG-1 and BUG-2 caveat entries from `audit/index.ts`
+- [x] Remove BUG-1 and BUG-2 caveat entries from `audit/index.ts`
 
 ---
 
@@ -1074,7 +1074,7 @@ All `[CURRENTLY FAILING]` labels in `bugs.regression.test.ts` describe **buggy**
 - **BUG-9**: Verify c3 now uses `allVotesByArea` total
 - **BUG-10**: Verify collision detection fires
 
-- [ ] Update `bugs.regression.test.ts` to assert correct post-fix behavior throughout
+- [x] Update `bugs.regression.test.ts` to assert correct post-fix behavior throughout
 
 ---
 
@@ -1120,8 +1120,8 @@ function getClientIp(req: IncomingMessage): string {
 }
 ```
 
-- [ ] Fix `getClientIp()` in `server-http.ts`
-- [ ] Add trusted proxy range check
+- [x] Fix `getClientIp()` in `server-http.ts`
+- [x] Add trusted proxy range check
 
 ---
 
@@ -1141,8 +1141,8 @@ const safeFromEntries = <V>(entries: [string, V][]): Record<string, V> =>
 
 Replace all `Object.fromEntries(...)` calls in `normalizer.ts` with `safeFromEntries(...)`.
 
-- [ ] Add `safeFromEntries()` helper to `normalizer.ts`
-- [ ] Replace all `Object.fromEntries` call sites
+- [x] Add `safeFromEntries()` helper to `normalizer.ts`
+- [x] Replace all `Object.fromEntries` call sites
 
 ---
 
@@ -1164,7 +1164,7 @@ if (body.length > MAX_BODY_BYTES) {
 }
 ```
 
-- [ ] Add body size guard to `server-http.ts`
+- [x] Add body size guard to `server-http.ts`
 
 ---
 
@@ -1184,7 +1184,7 @@ function setSecurityHeaders(res: ServerResponse): void {
 }
 ```
 
-- [ ] Add `setSecurityHeaders()` and call it on every response
+- [x] Add `setSecurityHeaders()` and call it on every response
 
 ---
 
@@ -1205,7 +1205,7 @@ if (!resolvedPath.startsWith(expectedDir + path.sep) && !resolvedPath.startsWith
 }
 ```
 
-- [ ] Add path validation when `CACHE_FILE` env var is consumed
+- [x] Add path validation when `CACHE_FILE` env var is consumed
 
 ---
 
@@ -1222,8 +1222,8 @@ const sanitizeForLog = (s: unknown): string =>
   String(s).replace(/[\x00-\x1f\x7f]/g, '').slice(0, 200);
 ```
 
-- [ ] Add `sanitizeForLog()` helper
-- [ ] Replace raw input in error messages with `sanitizeForLog(input)`
+- [x] Add `sanitizeForLog()` helper
+- [x] Replace raw input in error messages with `sanitizeForLog(input)`
 
 ---
 
@@ -1235,17 +1235,17 @@ const sanitizeForLog = (s: unknown): string =>
 
 **Fix:** Compute SHA-256 of the file on write; store hash alongside. On read, recompute hash and reject if mismatch (clear cache and start fresh).
 
-- [ ] Add hash-on-write, hash-check-on-read to `cache.ts`
+- [x] Add hash-on-write, hash-check-on-read to `cache.ts`
 
 ---
 
 ### Step 8: Build + test
 
-- [ ] `npm run build` — no TypeScript errors
-- [ ] `npm test` — all tests pass
-- [ ] Commit: `Phase 20: critical security fixes (XFF, prototype pollution, body limit, headers, cache integrity)`
-- [ ] Push to GitHub
-- [ ] Logbook entry
+- [x] `npm run build` — no TypeScript errors
+- [x] `npm test` — all tests pass
+- [x] Commit: `Phase 20: critical security fixes (XFF, prototype pollution, body limit, headers, cache integrity)`
+- [x] Push to GitHub
+- [x] Logbook entry
 
 ---
 
@@ -1270,9 +1270,9 @@ const q = query.toLowerCase();
 return row.party_id?.toLowerCase() === q || row.party_name?.toLowerCase().includes(q);
 ```
 
-- [ ] Fix `matchesParty()` in `shared.ts`
-- [ ] Search for inline `=== query` / `=== party` comparisons in tool files and lowercase them
-- [ ] Add test case to `shared.test.ts` for lowercase input matching uppercase `party_id`
+- [x] Fix `matchesParty()` in `shared.ts`
+- [x] Search for inline `=== query` / `=== party` comparisons in tool files and lowercase them
+- [x] Add test case to `shared.test.ts` for lowercase input matching uppercase `party_id`
 
 ---
 
@@ -1287,9 +1287,9 @@ return row.party_id?.toLowerCase() === q || row.party_name?.toLowerCase().includ
 2. Update each to `conc.top1_share_pct`, `conc.top3_share_pct`, etc.
 3. Remove any manual `× 100` multiply that was compensating for the old fraction output
 
-- [ ] Audit all callers of `concentrationMetrics()` in `analytics/index.ts`
-- [ ] Update field references to `_pct` variants at all call sites
-- [ ] Add assertions in test that `analyze_candidate_profile` concentration values are > 1 (percentages)
+- [x] Audit all callers of `concentrationMetrics()` in `analytics/index.ts`
+- [x] Update field references to `_pct` variants at all call sites
+- [x] Add assertions in test that `analyze_candidate_profile` concentration values are > 1 (percentages)
 
 ---
 
@@ -1311,9 +1311,9 @@ const c2 = trendValues.length > 1 ? (rank - 1) / (trendValues.length - 1) : 0.5;
 
 Update `scoring_methodology.c2_trend.description` to reflect percentile-rank method.
 
-- [ ] Replace fixed ±10pp c2 formula with percentile rank
-- [ ] Update `scoring_methodology` description
-- [ ] Update Phase 19 `BUG-4` regression tests if they assumed fixed-scale c2 behavior
+- [x] Replace fixed ±10pp c2 formula with percentile rank
+- [x] Update `scoring_methodology` description
+- [x] Update Phase 19 `BUG-4` regression tests if they assumed fixed-scale c2 behavior
 
 ---
 
@@ -1331,10 +1331,10 @@ rank_within_party_caveat: 'Intra-party ranking only. Does not indicate election 
 
 Alternatively, add it once to the `method` block of each affected tool.
 
-- [ ] Add `rank_within_party_caveat` to `analyze_candidate_profile` output
-- [ ] Add `rank_within_party_caveat` to `analyze_within_party_position` output
-- [ ] Add `rank_within_party_caveat` to `get_rankings` / `get_top_n` output
-- [ ] Add caveat to `get_data_caveats` registry in `audit/index.ts`
+- [x] Add `rank_within_party_caveat` to `analyze_candidate_profile` output
+- [x] Add `rank_within_party_caveat` to `analyze_within_party_position` output
+- [x] Add `rank_within_party_caveat` to `get_rankings` / `get_top_n` output
+- [x] Add caveat to `get_data_caveats` registry in `audit/index.ts`
 
 ---
 
@@ -1350,17 +1350,17 @@ Alternatively, add it once to the `method` block of each affected tool.
 - `pedersen_period_length` (🟠 High) — scope: `area`
 - `compare_across_elections_eu_second_order` (🟡 Medium) — scope: `cross_election`
 
-- [ ] Add 4 caveat entries to `audit/index.ts`
+- [x] Add 4 caveat entries to `audit/index.ts`
 
 ---
 
 ### Step 6: Build + test
 
-- [ ] `npm run build` — no TypeScript errors
-- [ ] `npm test` — all tests pass
-- [ ] Commit: `Phase 21: analytics correctness — STAT-1, STAT-2, POL-7, POL-12, QUAL-2`
-- [ ] Push to GitHub
-- [ ] Logbook entry
+- [x] `npm run build` — no TypeScript errors
+- [x] `npm test` — all tests pass
+- [x] Commit: `Phase 21: analytics correctness — STAT-1, STAT-2, POL-7, POL-12, QUAL-2`
+- [x] Push to GitHub
+- [x] Logbook entry
 
 ---
 
@@ -1380,8 +1380,8 @@ Alternatively, add it once to the `method` block of each affected tool.
 
 **Fix:** Replace with `catch (err) { console.error('[tool-name]', err); }` and where possible include a `data_warning` or `error` field in the returned object.
 
-- [ ] Find all `catch (_) {}` instances across `src/tools/`
-- [ ] Replace with logged catch + surface error in output where feasible
+- [x] Find all `catch (_) {}` instances across `src/tools/`
+- [x] Replace with logged catch + surface error in output where feasible
 
 ---
 
@@ -1393,8 +1393,8 @@ Alternatively, add it once to the `method` block of each affected tool.
 
 **Fix:** Add lightweight schema guards on raw API responses before passing to normalizer. Verify expected top-level fields (`columns`, `data`, etc.) are present and are the right types. Throw a descriptive error on mismatch.
 
-- [ ] Add response shape guards in `pxweb-client.ts` after `response.json()`
-- [ ] Add guard in `normalizer.ts` before processing `metadata.variables`
+- [x] Add response shape guards in `pxweb-client.ts` after `response.json()`
+- [x] Add guard in `normalizer.ts` before processing `metadata.variables`
 
 ---
 
@@ -1412,18 +1412,18 @@ if (a.length < 2 || b.length < 2) {
 }
 ```
 
-- [ ] Add short-string fallback to bigram similarity function
-- [ ] Add test case: single-character input matching
+- [x] Add short-string fallback to bigram similarity function
+- [x] Add test case: single-character input matching
 
 ---
 
 ### Step 4: Build + test
 
-- [ ] `npm run build` — no TypeScript errors
-- [ ] `npm test` — all tests pass
-- [ ] Commit: `Phase 22: robustness — silent catch, API validation, bigram short-string fix`
-- [ ] Push to GitHub
-- [ ] Logbook entry
+- [x] `npm run build` — no TypeScript errors
+- [x] `npm test` — all tests pass
+- [x] Commit: `Phase 22: robustness — silent catch, API validation, bigram short-string fix`
+- [x] Push to GitHub
+- [x] Logbook entry
 
 ---
 
@@ -1441,7 +1441,7 @@ if (a.length < 2 || b.length < 2) {
 
 Reorder output object so `caveats` and `comparability_notes` appear before `results[]`. Affects JSON key ordering.
 
-- [ ] Reorder output fields in `compare_across_elections`
+- [x] Reorder output fields in `compare_across_elections`
 
 ---
 
@@ -1451,8 +1451,8 @@ Reorder output object so `caveats` and `comparability_notes` appear before `resu
 
 Add `years_between` (computed from election years) and `pedersen_per_cycle` (= `pedersen_index / (years_between / 4)`) so consumers can compare volatility across different-length inter-election periods.
 
-- [ ] Add `years_between` and `pedersen_per_cycle` to `analyze_area_volatility` output
-- [ ] Add to `get_area_profile` Pedersen section
+- [x] Add `years_between` and `pedersen_per_cycle` to `analyze_area_volatility` output
+- [x] Add to `get_area_profile` Pedersen section
 
 ---
 
@@ -1462,8 +1462,8 @@ Add `years_between` (computed from election years) and `pedersen_per_cycle` (= `
 
 Compute change from raw vote counts (`(votes2 / total2 - votes1 / total1) * 100`) before rounding, not from already-rounded `pct()` values.
 
-- [ ] Identify all `vote_share_change_pp` computation sites
-- [ ] Fix to derive from raw values, round at output
+- [x] Identify all `vote_share_change_pp` computation sites
+- [x] Fix to derive from raw values, round at output
 
 ---
 
@@ -1473,7 +1473,7 @@ Compute change from raw vote counts (`(votes2 / total2 - votes1 / total1) * 100`
 
 Add `area_electorate_votes` field to overperformance rows so consumers know whether a 5pp overperformance is in a 500-voter or a 50,000-voter area.
 
-- [ ] Add `area_total_votes` to overperformance output rows
+- [x] Add `area_total_votes` to overperformance output rows
 
 ---
 
@@ -1483,7 +1483,7 @@ Add `area_electorate_votes` field to overperformance rows so consumers know whet
 
 Add a minimum absolute vote threshold (e.g. ≥ 1% national share, or ≥ 100 votes) before qualifying a party as `biggest_gainer` / `biggest_loser`.
 
-- [ ] Add minimum threshold to `biggest_gainer` / `biggest_loser` computation
+- [x] Add minimum threshold to `biggest_gainer` / `biggest_loser` computation
 
 ---
 
@@ -1493,7 +1493,7 @@ Add a minimum absolute vote threshold (e.g. ≥ 1% national share, or ≥ 100 vo
 
 Add turnout ratio quantification and note on second-order election dynamics (Reif & Schmitt 1980) to the EU caveat block.
 
-- [ ] Expand EU caveat text
+- [x] Expand EU caveat text
 
 ---
 
@@ -1503,7 +1503,7 @@ Add turnout ratio quantification and note on second-order election dynamics (Rei
 
 When `election_type = 'municipal'` is compared with `'parliamentary'`, add a caveat noting that municipal elections include all residents 18+ (including non-citizens) while parliamentary is citizens-only.
 
-- [ ] Add quantified caveat for municipal/parliamentary cross-comparison
+- [x] Add quantified caveat for municipal/parliamentary cross-comparison
 
 ---
 
@@ -1513,8 +1513,8 @@ When `election_type = 'municipal'` is compared with `'parliamentary'`, add a cav
 
 Verify that `subnatLevel('eu')` returns the correct level (currently returns `'vaalipiiri'` — may need to return `'national'` since Finland is a single EU constituency).
 
-- [ ] Verify and correct `subnatLevel('eu')`
-- [ ] Update test in `shared.test.ts`
+- [x] Verify and correct `subnatLevel('eu')`
+- [x] Update test in `shared.test.ts`
 
 ---
 
@@ -1524,7 +1524,7 @@ Verify that `subnatLevel('eu')` returns the correct level (currently returns `'v
 
 The current `pedersen_method_note` mentions party splits/mergers generically. Name the specific events: SMP→PS (1995 election), Sini split (2017, appears in 2019 results), SKL→KD (2001).
 
-- [ ] Update `pedersen_method_note` text with specific party/year events
+- [x] Update `pedersen_method_note` text with specific party/year events
 
 ---
 
@@ -1534,7 +1534,7 @@ The current `pedersen_method_note` mentions party splits/mergers generically. Na
 
 The last histogram bucket's `to` field should equal `max` (the actual data maximum), not the arithmetically computed bucket boundary.
 
-- [ ] Clamp last bucket `to` to actual data max
+- [x] Clamp last bucket `to` to actual data max
 
 ---
 
@@ -1544,17 +1544,17 @@ The last histogram bucket's `to` field should equal `max` (the actual data maxim
 
 Add a `trend_caveat` field noting that historical trend averages exclude candidates who left politics — the trend skews toward more successful candidates.
 
-- [ ] Add `trend_caveat` to `get_area_profile` historical section
+- [x] Add `trend_caveat` to `get_area_profile` historical section
 
 ---
 
 ### Step final: Build + test
 
-- [ ] `npm run build` — no TypeScript errors
-- [ ] `npm test` — all tests pass
-- [ ] Commit: `Phase 23: PolSci framing — POL-5/6/8/9/10/11/13/14/15/16, STAT-3`
-- [ ] Push to GitHub
-- [ ] Logbook entry
+- [x] `npm run build` — no TypeScript errors
+- [x] `npm test` — all tests pass
+- [x] Commit: `Phase 23: PolSci framing — POL-5/6/8/9/10/11/13/14/15/16, STAT-3`
+- [x] Push to GitHub
+- [x] Logbook entry
 
 ---
 
@@ -1696,21 +1696,21 @@ Read `SYSTEM_PROMPT` and check every claim in the following sections:
 
 Cross-reference source: `src/data/election-tables.ts` registrations.
 
-- [ ] Read SYSTEM_PROMPT in full
-- [ ] Verify each coverage claim against election-tables.ts
-- [ ] Note every discrepancy
+- [x] Read SYSTEM_PROMPT in full
+- [x] Verify each coverage claim against election-tables.ts
+- [x] Note every discrepancy
 
 ### Step 2 — Fix discrepancies
 
-- [ ] Update SYSTEM_PROMPT in `src/server.ts` for any incorrect coverage claims
+- [x] Update SYSTEM_PROMPT in `src/server.ts` for any incorrect coverage claims
 
 ### Step final: Build + test
 
-- [ ] `npm run build` — must exit 0
-- [ ] `npm test` — all tests must pass
-- [ ] Commit: `Phase 26: system prompt coverage audit`
-- [ ] Push to GitHub
-- [ ] Logbook entry
+- [x] `npm run build` — must exit 0
+- [x] `npm test` — all tests must pass
+- [x] Commit: `Phase 26: system prompt coverage audit`
+- [x] Push to GitHub
+- [x] Logbook entry
 
 ---
 
@@ -1776,27 +1776,24 @@ const vuosiValues = metadata.variables.find(v => v.code === 'Vuosi')?.values ?? 
 const isMultiYear = vuosiValues.length > 1;
 ```
 
-- [ ] For `isMultiYear === true`: omit Vuosi filter, use `all_years` cache key
-- [ ] For `isMultiYear === false`: keep current behaviour (year in key, Vuosi filter present)
-- [ ] After `withCache`: when `isMultiYear`, filter `response.data` to `key[vuosiKeyIdx] === String(year)`
-- [ ] Helper: find `vuosiKeyIdx` from `response.columns.filter(c => c.type === 'd')`
+- [x] For `isMultiYear === true`: omit Vuosi filter, use `all_years` cache key
+- [x] For `isMultiYear === false`: keep current behaviour (year in key, Vuosi filter present)
+- [x] After `withCache`: when `isMultiYear`, filter `response.data` to `key[vuosiKeyIdx] === String(year)`
+- [x] Helper: find `vuosiKeyIdx` from `response.columns.filter(c => c.type === 'd')`
 
-### Step 2 — Tests in `src/data/loaders.test.ts` (or equivalent)
+### Step 2 — Tests in `src/data/loaders.cache.test.ts`
 
-- [ ] Multi-year table: verify cache key does not contain the year
-- [ ] Multi-year table: verify row filtering keeps only the requested year's rows
-- [ ] Single-year table: verify year still appears in cache key (regression guard)
-
-> If no loader unit tests currently exist, add tests to the normalizer test file or create
-> `src/data/loaders.cache.test.ts` with mocked `withCache`.
+- [x] Multi-year table: verify cache key does not contain the year
+- [x] Multi-year table: verify row filtering keeps only the requested year's rows
+- [x] Single-year table: verify year still appears in cache key (regression guard)
 
 ### Step final: Build + test
 
-- [ ] `npm run build` — must exit 0
-- [ ] `npm test` — all tests must pass
-- [ ] Commit: `Phase 27: COST-3 multi-year party table cache fix`
-- [ ] Push to GitHub
-- [ ] Logbook entry
+- [x] `npm run build` — must exit 0
+- [x] `npm test` — all tests must pass
+- [x] Commit: `Phase 27: COST-3 multi-year party table cache fix`
+- [x] Push to GitHub
+- [x] Logbook entry
 
 ---
 
@@ -1827,9 +1824,8 @@ Add a second listen path to `server-http.ts` that starts `https.createServer()` 
 
 **Decision to make before coding:** Which option does the user want?
 
-- [ ] User confirms Option A or Option B
-- [ ] If A: update CLAUDE.md, close BACKLOG NEW-SEC-5
-- [ ] If B: implement, document, close BACKLOG NEW-SEC-5
+- [x] User confirms Option A (Azure App Service — infrastructure TLS)
+- [x] If A: update CLAUDE.md, close BACKLOG NEW-SEC-5
 
 ---
 

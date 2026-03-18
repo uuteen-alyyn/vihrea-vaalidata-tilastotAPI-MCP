@@ -353,7 +353,7 @@ Years: 2012, 2017, 2021, 2025. Measures identical: lkm1, pros, pros_sp.
 
 ---
 
-## Phase 27: API Exploration & Table Registry ⬜ PLANNED
+## Phase 27: API Exploration & Table Registry ✅ COMPLETE
 
 **Goal:** Verify exact variable codes for all new tables; register them in `election-tables.ts`.
 
@@ -363,89 +363,63 @@ Years: 2012, 2017, 2021, 2025. Measures identical: lkm1, pros, pros_sp.
 - [x] ~~GET metadata for `statfin_evaa_pxt_13ys`~~ — **confirmed** (age groups, Tiedot measures, Alue dimension)
 - [x] ~~GET metadata for `statfin_evaa_pxt_13yv`~~ — **confirmed** (quintile codes 01–05, code 09=unknown to strip)
 - [x] ~~GET metadata for `statfin_kvaa_pxt_14w4`~~ — **confirmed** (gender var and eligible voter code differ from 13su)
-- [ ] GET metadata for `statfin_evaa_pxt_13yt` — confirm education level value codes and Tiedot measures
-- [ ] GET metadata for `statfin_evaa_pxt_13yu` — confirm origin/language value codes
-- [ ] GET metadata for `statfin_evaa_pxt_13yw` — confirm primary activity value codes
-- [ ] GET metadata for `statfin_kvaa_pxt_152q` (age group) and `statfin_kvaa_pxt_152r` (education) — confirm variable codes; note whether geographic `Alue` dimension is also present (expected yes)
-- [ ] GET metadata for `statfin_euvaa_pxt_14ha` (age group) and `statfin_euvaa_pxt_14hb` (education)
-- [ ] GET metadata for `statfin_pvaa_pxt_14nk` (age group) and `statfin_pvaa_pxt_14nl` (education)
-- [ ] Extend variable code reference table (see Confirmed Variable Codes section) with remaining turnout tables (13yt, 13yu, 13yw, 152q, 152r, 14ha, 14hb, 14nk, 14nl)
-- [ ] Add `voter_background` and `voter_turnout_by_demographics` fields to `ElectionTableSet` interface
-- [ ] Add `findVoterBackgroundTableForType()` helper
-- [ ] Register tables in `election-tables.ts`:
+- [x] GET metadata for `statfin_evaa_pxt_13yt` — confirm education level value codes and Tiedot measures
+- [x] GET metadata for `statfin_evaa_pxt_13yu` — confirm origin/language value codes
+- [x] GET metadata for `statfin_evaa_pxt_13yw` — confirm primary activity value codes
+- [x] GET metadata for `statfin_kvaa_pxt_152q` (age group) and `statfin_kvaa_pxt_152r` (education) — confirm variable codes; note whether geographic `Alue` dimension is also present (expected yes)
+- [x] GET metadata for `statfin_euvaa_pxt_14ha` (age group) and `statfin_euvaa_pxt_14hb` (education)
+- [x] GET metadata for `statfin_pvaa_pxt_14nk` (age group) and `statfin_pvaa_pxt_14nl` (education)
+- [x] Extend variable code reference table (see Confirmed Variable Codes section) with remaining turnout tables (13yt, 13yu, 13yw, 152q, 152r, 14ha, 14hb, 14nk, 14nl)
+- [x] Add `voter_background` and `voter_turnout_by_demographics` fields to `ElectionTableSet` interface
+- [x] Add `findVoterBackgroundTableForType()` helper
+- [x] Register tables in `election-tables.ts`:
   - parliamentary 2023: `voter_background: 'statfin_evaa_pxt_13su'` + all 5 turnout tables
   - municipal 2025: `voter_background: 'statfin_kvaa_pxt_14w4'` + all 5 turnout tables
   - eu_parliament 2024: 5 turnout tables (no voter_background)
   - presidential 2024: 5 turnout tables (no voter_background)
 
 ### Tests
-- [ ] `npm run build` exits 0
+- [x] `npm run build` exits 0
 - [x] ~~Spot-check: `statfin_evaa_pxt_13su` metadata group dimension~~ — confirmed pre-phase
 - [x] ~~Spot-check: `statfin_evaa_pxt_13yv` income quintile codes~~ — confirmed: 5 quintile values (01–05) + SSS total + 09 unknown
 - [x] ~~Spot-check: `statfin_kvaa_pxt_14w4` years~~ — confirmed: 2012, 2017, 2021, 2025
 
 ---
 
-## Phase 28: Loaders & Normalizers ⬜ PLANNED
+## Phase 28: Loaders & Normalizers ✅ COMPLETE
 
 **Goal:** Implement data loading and normalization for both data types.
 
 ### Tasks
 
 **New types (src/data/types.ts):**
-- [ ] Add `VoterBackgroundRow`
-- [ ] Add `VoterTurnoutDemographicRow`
+- [x] Add `VoterBackgroundRow`
+- [x] Add `VoterTurnoutDemographicRow`
 
 **New normalizers:**
-- [ ] `normalizeVoterBackground(rawResponse, electionType, group, dimension)` → `VoterBackgroundRow[]`
-  - Use election-type-specific mappings for group codes (13su: `00S1`=eligible_voters, `1002`=candidates, `2002`=elected; 14w4: `0001`=eligible_voters)
-  - Use election-type-specific gender variable name (`Sukupuoli` for parliamentary, `Ehdokkaan sukupuoli` for municipal)
-  - Map `Taustamuuttujat` codes to canonical `category_code` / `category_name` using the dimension→codes table from "Confirmed Variable Codes" section
-  - Strip aggregate/total rows (SSS-prefixed Taustamuuttujat codes, e.g. ptoSSS, kouSSS, sekSSS)
-  - `share_pct` comes from `pros` measure; `count` from `lkm1` — both fetched in one API call
-  - Note: year filtering is done server-side in the loader (not here); normalizer receives already-filtered data
-- [ ] `normalizeVoterTurnoutByDemographics(rawResponse, electionType, dimension)` → `VoterTurnoutDemographicRow[]`
-  - For parliamentary `age_group` (13ys): the raw groups are {018, 019, 20-24, 25-29, …}. Aggregate into standard 7 groups:
-    - 18–24 = {018 + 019 + 20-24}, 25–34 = {25-29 + 30-34}, 35–44 = {35-39 + 40-44}
-    - 45–54 = {45-49 + 50-54}, 55–64 = {55-59 + 60-64}, 65–74 = {65-69 + 70-74}, 75+ = {75-79 + 80-}
-    - Sum `aoiky_al_evaa` (eligible voters) and `a_al_evaa` (votes cast) counts per group, then recompute turnout_pct = votes_cast / eligible_voters × 100. **Never aggregate percentages directly.**
-  - For all other dimensions: map dimension-specific code variable → category_code / category_name; map `aoiky_al_evaa` → eligible_voters, `a_al_evaa` → votes_cast, `pros_al_evaa` → turnout_pct
-  - Strip SSS (total) rows and any "Tuntematon/Unknown" codes (e.g. Tulokvintiili code 09)
-  - All turnout tables include all three gender values (SSS/1/2) in the same response — use `gender` parameter to filter after fetch; this also enables gender gap computation without extra API calls
+- [x] `normalizeVoterBackground(rawResponse, electionType, group, dimension)` → `VoterBackgroundRow[]`
+- [x] `normalizeVoterTurnoutByDemographics(rawResponse, electionType, dimension)` → `VoterTurnoutDemographicRow[]`
 
 **New loaders:**
-- [ ] `loadVoterBackground(electionType, year, group, dimension, gender?)` → `VoterBackgroundRow[]`
-  - Validate election type is parliamentary or municipal; throw descriptive error otherwise
-  - Use `findVoterBackgroundTableForType()` to get table ID; throw with available years if not found
-  - **Year filtering:** pass `{ code: 'Vuosi', selection: { filter: 'item', values: [String(year)] } }` in POST body — same pattern as `loadPartyResults` in `loaders.ts:75-77`
-  - **Dimension filtering:** filter `Taustamuuttujat` to the specific codes for the requested dimension (e.g. for `education`: values `[kouSSS, kou1_9, kou3_4, kou5, kou6, kou7_8]`)
-  - **Area filtering:** not applicable to background tables (no Alue dimension in 13su/14w4)
-  - Fetch all three gender values in one call; pass gender to normalizer for filtering
-  - Fetch and normalize
-- [ ] `loadVoterTurnoutByDemographics(electionType, year, dimension, gender?)` → `VoterTurnoutDemographicRow[]`
-  - Validate election type is supported; throw with supported list otherwise
-  - Validate year matches the single valid year for that election type; throw with available year if not
-  - Select the correct table from `voter_turnout_by_demographics` map
-  - **Area filter:** always include `{ code: 'Alue', selection: { filter: 'item', values: ['SSS'] } }` to get national totals only (all turnout tables have a geographic Alue dimension)
-  - Fetch all three gender values (SSS/1/2) in one call — enables gender gap computation without extra requests
-  - Fetch and normalize
+- [x] `loadVoterBackground(electionType, year, group, dimension, gender?)` → `VoterBackgroundRow[]`
+- [x] `loadVoterTurnoutByDemographics(electionType, year, dimension, gender?)` → `VoterTurnoutDemographicRow[]`
 
 ### Tests
-- [ ] `normalizeVoterBackground` unit test: mock 13su response → correct `VoterBackgroundRow[]` for `eligible_voters` + `education`; verify `pros` → `share_pct` and `lkm1` → `count` mapping
-- [ ] `normalizeVoterBackground` unit test: 14w4 mock uses `Ehdokkaan sukupuoli` variable and `0001` eligible voter code correctly
-- [ ] `normalizeVoterTurnoutByDemographics` unit test (age_group parliamentary): mock 13ys response with groups {018, 019, 20-24, 25-29, 30-34} → correctly aggregated into {18-24, 25-34} using count measures, turnout_pct recomputed
-- [ ] `normalizeVoterTurnoutByDemographics` unit test (income_quintile): mock 13yv → 5 quintile rows; code 09 (Tuntematon) is stripped; SSS row is stripped
-- [ ] `loadVoterBackground` integration test: real API call parliamentary 2023 `eligible_voters` `education` → non-empty rows, share_pct values sum to ~100%
-- [ ] `loadVoterBackground` integration test: parliamentary 2011 `elected` `income_decile` → exactly 2 rows (des1, des10 — lowest and highest decile only)
-- [ ] `loadVoterBackground` error test: `eu_parliament` → throws with supported types listed
-- [ ] `loadVoterBackground` error test: parliamentary 2007 → throws with available years listed
-- [ ] `loadVoterTurnoutByDemographics` integration test: parliamentary 2023 `income_quintile` → 5 rows (no Tuntematon), highest turnout in Q5 (top income), lowest in Q1
-- [ ] `loadVoterTurnoutByDemographics` error test: parliamentary 2019 → throws with message stating 2023 is the only available year
-- [ ] `loadVoterTurnoutByDemographics` error test: `regional` → throws with supported list
+- [x] `normalizeVoterBackground` unit test: mock 13su response → correct `VoterBackgroundRow[]` for `eligible_voters` + `education`; verify `pros` → `share_pct` and `lkm1` → `count` mapping
+- [x] `normalizeVoterBackground` unit test: 14w4 mock uses `Ehdokkaan sukupuoli` variable and `0001` eligible voter code correctly
+- [x] `normalizeVoterTurnoutByDemographics` unit test (age_group parliamentary): mock 13ys response with groups {018, 019, 20-24, 25-29, 30-34} → correctly aggregated into {18-24, 25-34} using count measures, turnout_pct recomputed
+- [x] `normalizeVoterTurnoutByDemographics` unit test (income_quintile): mock 13yv → 5 quintile rows; code 09 (Tuntematon) is stripped; SSS row is stripped
+- [x] `loadVoterBackground` integration test: real API call parliamentary 2023 `eligible_voters` `education` → non-empty rows, share_pct values sum to ~100%
+- [x] `loadVoterBackground` integration test: parliamentary 2011 `elected` `income_decile` → exactly 2 rows (des1, des10 — lowest and highest decile only)
+- [x] `loadVoterBackground` error test: `eu_parliament` → throws with supported types listed
+- [x] `loadVoterBackground` error test: parliamentary 2007 → throws with available years listed
+- [x] `loadVoterTurnoutByDemographics` integration test: parliamentary 2023 `income_quintile` → 5 rows (no Tuntematon), highest turnout in Q5 (top income), lowest in Q1
+- [x] `loadVoterTurnoutByDemographics` error test: parliamentary 2019 → throws with message stating 2023 is the only available year
+- [x] `loadVoterTurnoutByDemographics` error test: `regional` → throws with supported list
 
 ---
 
-## Phase 29: Tool Handlers ⬜ PLANNED
+## Phase 29: Tool Handlers ✅ COMPLETE
 
 **Goal:** Implement and register both MCP tools.
 
@@ -455,59 +429,40 @@ Years: 2012, 2017, 2021, 2025. Measures identical: lkm1, pros, pros_sp.
 
 > File structure confirmed: pattern is `src/tools/{category}/index.ts` exporting `register{Category}Tools(server: McpServer): void`. New file is `src/tools/demographics/index.ts` exporting `registerDemographicsTools`. Register in `src/server.ts` alongside the other `register*Tools` calls.
 
-- [ ] Zod schema for `get_voter_background`:
-  - `election_type`: enum with description listing supported types
-  - `year`: number with description listing valid values per type
-  - `group`: enum `eligible_voters | candidates | elected` — description must explain these are three different populations; note that `candidates` returns all candidates combined (not per-party)
-  - `dimension`: enum of 6 options — description explains what each covers; for `income_decile` explicitly state "only lowest and highest decile available, not all 10"
-  - `gender`: optional enum, default `total`
-  - `output_mode`: optional enum, default `analysis`
-- [ ] Zod schema for `get_voter_turnout_by_demographics`:
-  - `election_type`: enum — description must state "parliamentary 2023, municipal 2025, eu_parliament 2024, presidential 2024 only"
-  - `year`: number — description must list the one valid year per election type
-  - `dimension`: enum of 5 options — description explains each
-  - `gender`: optional enum, default `total`
-  - `output_mode`: optional enum, default `analysis`
-- [ ] `get_voter_background` handler:
-  - Call `loadVoterBackground()`
-  - Analysis mode: markdown table sorted by share_pct desc; header showing election/year/group/dimension; coverage caveat listing available years; note distinguishing eligible_voters from candidates from elected
-  - For `income_decile`: add explicit caveat that only the bottom and top decile are shown
-  - Data mode: JSON rows
-- [ ] `get_voter_turnout_by_demographics` handler:
-  - Call `loadVoterTurnoutByDemographics()`
-  - Analysis mode: markdown table sorted by turnout_pct desc; highlight highest and lowest group; always include the mandatory coverage caveat ("only available for [election] [year]")
-  - Gender gap note when `gender=total`: computed by comparing male vs female rows **from the same API response** (no extra calls needed — all three genders are in the same table). Highlight the dimension category with the largest gap.
-  - Data mode: JSON rows
-- [ ] Register both handlers in `src/server.ts`
+- [x] Zod schema for `get_voter_background`
+- [x] Zod schema for `get_voter_turnout_by_demographics`
+- [x] `get_voter_background` handler
+- [x] `get_voter_turnout_by_demographics` handler
+- [x] Register both handlers in `src/server.ts`
 
 ### Tests
-- [ ] `get_voter_background` parliamentary 2023 `eligible_voters` `education` → non-empty analysis output with markdown table
-- [ ] `get_voter_background` parliamentary 2011 `elected` `income_decile` → exactly 2 rows in output (lowest and highest decile only); output includes caveat about limited decile coverage
-- [ ] `get_voter_background` municipal 2025 `candidates` `employment` → non-empty output; verifies 14w4 `Ehdokkaan sukupuoli` and `0001` mappings work
-- [ ] `get_voter_background` `eu_parliament` → structured error naming supported election types
-- [ ] `get_voter_background` parliamentary 2007 → structured error listing available years
-- [ ] `get_voter_turnout_by_demographics` parliamentary 2023 `income_quintile` `total` → 5 rows (no Tuntematon), highest turnout in Q5 (top income), lowest in Q1
-- [ ] `get_voter_turnout_by_demographics` parliamentary 2023 `age_group` → 7 age group rows aggregated from {018, 019, 5-year bins}; first group label is "18–24"
-- [ ] `get_voter_turnout_by_demographics` eu_parliament 2024 `education` → rows present
-- [ ] `get_voter_turnout_by_demographics` parliamentary 2019 → structured error stating 2023 is the only available year and why
-- [ ] `get_voter_turnout_by_demographics` `regional` → structured error naming supported types
+- [x] `get_voter_background` parliamentary 2023 `eligible_voters` `education` → non-empty analysis output with markdown table
+- [x] `get_voter_background` parliamentary 2011 `elected` `income_decile` → exactly 2 rows in output (lowest and highest decile only); output includes caveat about limited decile coverage
+- [x] `get_voter_background` municipal 2025 `candidates` `employment` → non-empty output; verifies 14w4 `Ehdokkaan sukupuoli` and `0001` mappings work
+- [x] `get_voter_background` `eu_parliament` → structured error naming supported election types
+- [x] `get_voter_background` parliamentary 2007 → structured error listing available years
+- [x] `get_voter_turnout_by_demographics` parliamentary 2023 `income_quintile` `total` → 5 rows (no Tuntematon), highest turnout in Q5 (top income), lowest in Q1
+- [x] `get_voter_turnout_by_demographics` parliamentary 2023 `age_group` → 7 age group rows aggregated from {018, 019, 5-year bins}; first group label is "18–24"
+- [x] `get_voter_turnout_by_demographics` eu_parliament 2024 `education` → rows present
+- [x] `get_voter_turnout_by_demographics` parliamentary 2019 → structured error stating 2023 is the only available year and why
+- [x] `get_voter_turnout_by_demographics` `regional` → structured error naming supported types
 
 ---
 
-## Phase 30: Live Validation & System Prompt ⬜ PLANNED
+## Phase 30: Live Validation & System Prompt ✅ COMPLETE
 
 **Goal:** Validate both tools against real published data; add system prompt documentation.
 
 ### Tasks
 
-- [ ] Live test: `get_voter_turnout_by_demographics` parliamentary 2023 `income_quintile` — verify top/bottom quintile values are in the vicinity of 85% / 58% as published. Note any methodology difference (e.g. if the published figure uses a different population base or area coverage filter).
-- [ ] Live test: `get_voter_background` parliamentary 2023 `elected` `education` vs parliamentary 2011 `elected` `education` — verify trend direction (expectation: share with university degree has increased)
-- [ ] Live test: `get_voter_turnout_by_demographics` eu_parliament 2024 `origin_language` — verify foreign-language speaker turnout is substantially below Finnish-speaker turnout
-- [ ] Live test: `get_voter_background` municipal 2025 `candidates` `employment` — verify non-empty output; review category names for sense
-- [ ] Add system prompt caveat text (from the "System prompt caveat text" section above) to `src/server.ts`
-- [ ] `npm run build` exits 0
-- [ ] `npm test` all pass — record count in logbook
-- [ ] Write logbook entry
+- [x] Live test: `get_voter_turnout_by_demographics` parliamentary 2023 `income_quintile` — Q1=58.4%, Q5=85.1% ✅
+- [x] Live test: `get_voter_background` parliamentary 2023 `elected` `education` vs 2011 — Master/research: 50%→58% ✅
+- [x] Live test: `get_voter_turnout_by_demographics` eu_parliament 2024 `origin_language` — Finnish 40.1%, foreign-language 17.3% ✅
+- [x] Live test: `get_voter_background` municipal 2025 `candidates` `employment` — employed 74.8%, retired 14.3% ✅
+- [x] Add system prompt caveat text to `src/server.ts`
+- [x] `npm run build` exits 0
+- [x] `npm test` all pass — 132/132
+- [x] Write logbook entry
 
 ---
 
