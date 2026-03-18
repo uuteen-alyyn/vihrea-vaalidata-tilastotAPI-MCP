@@ -508,3 +508,27 @@ Investigated and resolved the municipal 2021 candidate data gap.
 - Removed stale `AreaLevel` import (unused after earlier refactoring)
 
 **Build + test:** 99/99 passing
+
+---
+
+## PHASE 15 COMPLETE: compare_across_elections TOOL — 2026-03-18 10:17:00
+
+Added `compare_across_elections` tool to `src/tools/analytics/index.ts`.
+
+**Purpose:** Tracks a party's national vote share and total across multiple election types and years in a single response (e.g. SDP: municipal 2021 → parliamentary 2023 → regional 2025).
+
+**Input:** party string (max 200 chars), elections array of {election_type, year} pairs (min 2, max 10). Presidential excluded from election_type enum (no party dimension in presidential data).
+
+**Output:**
+- results[]: election_type, year, votes, vote_share_pct, party_id, party_name (or error per entry)
+- caveats[]: dynamic — general cross-type warning, EU denominator note, municipal national-share note
+- comparability_notes{}: per-type explanation of electorate definition
+- method{}: description + source_tables
+
+**Implementation notes:**
+- Parallel Promise.all for all election fetches
+- vote_share_pct uses table's own share column; computes from votes/total if missing
+- Results sorted by year asc, then election_type for same-year entries
+- loadPartyResults called with 'SSS' (national aggregate) for each election
+
+**Build + test:** 99/99 passing

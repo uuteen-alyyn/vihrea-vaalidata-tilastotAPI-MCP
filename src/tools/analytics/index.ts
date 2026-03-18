@@ -849,4 +849,122 @@ export function registerAnalyticsTools(server: McpServer): void {
     }
   );
 
+  // ── compare_across_elections ─────────────────────────────────────────────
+  server.tool(
+    'compare_across_elections',
+    'Compares a party\'s national vote share and total across multiple election types and years in a single response. Useful for tracking a party\'s trajectory across parliamentary, municipal, regional, and EU elections. Includes comparability caveats because electorates and election rules differ across types.',
+    {
+      party: z.string().max(200).describe(
+        'Party abbreviation or name to look up (e.g. "SDP", "KOK", "Perussuomalaiset"). ' +
+        'Matched against party_id and party_name in each election.'
+      ),
+      elections: z.array(
+        z.object({
+          election_type: z.enum(['parliamentary', 'municipal', 'eu_parliament', 'regional']),
+          year: z.number().int().min(1983).max(2030),
+        })
+      ).min(2).max(10).describe(
+        'List of election type + year pairs to compare. ' +
+        'Example: [{"election_type":"parliamentary","year":2023},{"election_type":"municipal","year":2021}]. ' +
+        'Presidential elections are excluded — no party dimension exists in presidential data.'
+      ),
+    },
+    async ({ party, elections }) => {
+      const tableIds: string[] = [];
+
+      const results = await Promise.all(elections.map(async ({ election_type, year }) => {
+        try {
+          const { rows, tableId } = await loadPartyResults(year, 'SSS', election_type as ElectionType);
+          if (!tableIds.includes(tableId)) tableIds.push(tableId);
+
+          // Find national total row for this party
+          const row = rows.find((r) => matchesParty(r, party));
+          if (!row) {
+            return {
+              election_type,
+              year,
+              votes: null,
+              vote_share_pct: null,
+              party_id: null,
+              party_name: null,
+              error: `Party "${party}" not found in ${election_type} ${year}`,
+            };
+          }
+
+          // Find total national votes (all parties combined — sum SSS row if present, else sum all party rows)
+          const nationalTotal = rows.reduce((s, r) => s + r.votes, 0);
+
+          return {
+            election_type,
+            year,
+            votes: row.votes,
+            vote_share_pct: row.vote_share ? pct(row.vote_share) : pct((row.votes / nationalTotal) * 100),
+            party_id: row.party_id,
+            party_name: row.party_name,
+          };
+        } catch (err) {
+          console.error(`[compare_across_elections] failed for ${election_type} ${year}:`, err);
+          return {
+            election_type,
+            year,
+            votes: null,
+            vote_share_pct: null,
+            party_id: null,
+            party_name: null,
+            error: `Data unavailable for ${election_type} ${year}`,
+          };
+        }
+      }));
+
+      // Sort by year ascending, then by election_type for same-year entries
+      results.sort((a, b) => a.year !== b.year ? a.year - b.year : a.election_type.localeCompare(b.election_type));
+
+      // Comparability notes per election type
+      const comparabilityNotes: Record<string, string> = {
+        parliamentary: 'National electorate: all Finnish citizens aged 18+. Vote share = % of all valid votes cast nationally.',
+        municipal:     'National electorate: all Finnish citizens + permanent residents aged 18+. Vote share = % of all valid municipal votes cast nationally (sum across all municipalities).',
+        regional:      'National electorate: all Finnish citizens + permanent residents aged 18+ (same as municipal). Covers 21 hyvinvointialue.',
+        eu_parliament: 'Electorate: Finnish citizens + EU citizens residing in Finland. Non-Finnish EU citizens may vote here instead of their home country. Slightly different denominator from other election types.',
+      };
+
+      const uniqueTypes = [...new Set(results.map((r) => r.election_type))];
+      const caveats: string[] = [];
+      if (uniqueTypes.length > 1) {
+        caveats.push(
+          'Cross-election-type vote shares are NOT directly comparable. ' +
+          'Each election type has different eligibility rules, different total electorates, ' +
+          'and different party dynamics. Treat this as indicative trend data, not a strict apples-to-apples comparison.'
+        );
+      }
+      if (uniqueTypes.includes('eu_parliament')) {
+        caveats.push(
+          'EU election vote share has a different denominator (EU citizens in Finland can vote here). ' +
+          'EU turnout is typically much lower than national elections, which affects the share values.'
+        );
+      }
+      if (uniqueTypes.includes('municipal')) {
+        caveats.push(
+          'Municipal vote share at national level sums votes across all municipalities. ' +
+          'Parties without candidates in all municipalities will have lower national shares.'
+        );
+      }
+
+      return mcpText({
+        party_query: party,
+        results,
+        caveats,
+        comparability_notes: Object.fromEntries(
+          uniqueTypes.map((t) => [t, comparabilityNotes[t] ?? ''])
+        ),
+        method: {
+          description:
+            'National vote totals and shares loaded from each election\'s party-by-kunta table ' +
+            'at the national (SSS) level. vote_share_pct taken from the table\'s own share column when ' +
+            'available, otherwise computed as votes / sum_of_all_party_votes × 100.',
+          source_tables: tableIds,
+        },
+      });
+    }
+  );
+
 }

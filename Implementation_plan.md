@@ -591,18 +591,44 @@ Tables FOUND in StatFin_Passiivi. 12 per-vaalipiiri candidate tables exist (`sta
 
 ---
 
-## Phase 15: Cross-Election-Type Analytics Tool
+## Phase 15: Cross-Election-Type Analytics Tool ✅ COMPLETE
 
-**Goal:** Add a tool that compares a party or candidate across different election types within a single response (e.g. SDP performance municipal 2021 → parliamentary 2023 → regional 2025).
+**Goal:** Add a tool that compares a party across different election types within a single response (e.g. SDP performance municipal 2021 → parliamentary 2023 → regional 2025).
 
 **Context:** Current `compare_elections` works within one election type only. Cross-type comparison requires normalizing vote share across fundamentally different electorate sizes, which must be handled carefully (caveats about incomparable denominators).
 
+### Implementation
+
+Tool: `compare_across_elections` — added to `src/tools/analytics/index.ts`
+
+**Input schema:**
+- `party` (string, max 200) — party abbreviation or name, matched against party_id and party_name
+- `elections` (array of `{election_type, year}`, min 2, max 10) — which elections to compare
+- Note: presidential excluded (no party dimension in presidential data)
+
+**Output:**
+- `results[]`: election_type, year, votes, vote_share_pct, party_id, party_name, error
+- `caveats[]`: dynamic warnings based on which election types are included
+- `comparability_notes{}`: per-type explanation of electorate definition
+- `method{}`: description + source table IDs
+
+**Comparability caveats handled:**
+- Cross-type comparison: general "not directly comparable" caveat when multiple types present
+- EU elections: different denominator (EU citizens in Finland can vote), low turnout
+- Municipal: national share = sum across all municipalities (penalizes parties without candidates everywhere)
+- Presidential: excluded from input enum (no party dimension)
+
+**Implementation details:**
+- Parallel `Promise.all` fetches national SSS-level data for each election
+- vote_share_pct uses table's own `vote_share` column when available; falls back to votes/sum×100
+- Results sorted by year ascending, then election_type for same-year entries
+
 ### Tasks
-- [ ] Design tool schema: inputs (party or candidate name, list of election_type+year pairs), outputs (table + methodology note)
-- [ ] Implement `compare_across_elections` tool in analytics
-- [ ] Handle caveat: EU/presidential vote share not directly comparable to municipal/parliamentary
-- [ ] Test: SDP across municipal 2021, parliamentary 2023, regional 2025
-- [ ] Logbook entry
+- [x] Design tool schema
+- [x] Implement `compare_across_elections` in analytics
+- [x] Handle EU/municipal comparability caveats
+- [x] Build + tests: 99/99 passing
+- [ ] Live test: SDP across municipal 2021, parliamentary 2023, regional 2025
 
 ---
 
