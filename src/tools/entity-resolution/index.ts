@@ -29,9 +29,21 @@ function buildBigrams(s: string): Set<string> {
   return set;
 }
 
-function bigramSimilarity(aSet: Set<string>, b: string): number {
-  if (aSet.size === 0 || b.length < 2) return 0;
+/**
+ * Dice-coefficient bigram similarity.
+ * For strings shorter than 2 chars, bigrams are undefined — falls back to
+ * exact match (1.0) or prefix match (0.5) to avoid a spurious 0 score for
+ * single-character queries/nicknames (FUNC-7).
+ */
+function bigramSimilarity(a: string, aSet: Set<string>, b: string): number {
+  if (a.length < 2 || b.length < 2) {
+    if (a === b) return 1.0;
+    if (b.startsWith(a) || a.startsWith(b)) return 0.5;
+    return 0;
+  }
+  if (aSet.size === 0) return 0;
   const bSet = buildBigrams(b);
+  if (bSet.size === 0) return 0;
   let intersection = 0;
   for (const bg of aSet) if (bSet.has(bg)) intersection++;
   return (2 * intersection) / (aSet.size + bSet.size);
@@ -46,7 +58,7 @@ function scoreMatch(query: string, candidate: string): number {
   if (qNorm === cNorm) return 0.95;
   if (cLow.startsWith(qLow) || cLow.includes(` ${qLow}`) || cLow.includes(`${qLow} `)) return 0.88;
   if (cNorm.startsWith(qNorm) || cNorm.includes(qNorm)) return 0.82;
-  return bigramSimilarity(buildBigrams(qNorm), cNorm);
+  return bigramSimilarity(qNorm, buildBigrams(qNorm), cNorm);
 }
 
 /** Pre-computed scorer for batch candidate loops — avoids rebuilding query bigrams on every iteration. */
@@ -58,7 +70,7 @@ function scoreMatchFast(
   if (qNorm === cNorm) return 0.95;
   if (cLow.startsWith(qLow) || cLow.includes(` ${qLow}`) || cLow.includes(`${qLow} `)) return 0.88;
   if (cNorm.startsWith(qNorm) || cNorm.includes(qNorm)) return 0.82;
-  return bigramSimilarity(qBigrams, cNorm);
+  return bigramSimilarity(qNorm, qBigrams, cNorm);
 }
 
 function confidenceLabel(score: number): 'exact' | 'high' | 'medium' | 'low' {

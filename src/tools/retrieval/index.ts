@@ -199,7 +199,11 @@ export function registerRetrievalTools(server: McpServer): void {
             const { rows: candRows, tableId: candId } = await loadCandidateResults(year, unit_key, undefined, electionType);
             allRows.push(...candRows.filter(r => r.area_id === area_id || r.area_id.startsWith(area_id)));
             tableIds.push(candId);
-          } catch (_) { /* candidates optional */ }
+          } catch (err) {
+            console.error('[get_area_results] candidate fetch failed (candidates are optional):', err);
+            // Surface in output below via candidate_warning — not a fatal error
+            tableIds.push(`candidate_load_failed: ${String(err)}`);
+          }
         }
 
         const source = { table_ids: tableIds, query_timestamp: new Date().toISOString() };
@@ -350,7 +354,7 @@ function buildPartyAnalysis(
   const byParty = new Map<string, { party_name: string; total_votes: number; areas: number }>();
 
   for (const row of rows) {
-    if (!row.party_id || row.area_level === 'koko_suomi') continue;
+    if (!row.party_id || row.area_level !== 'kunta') continue;
     const existing = byParty.get(row.party_id);
     if (existing) {
       existing.total_votes += row.votes;

@@ -1,5 +1,32 @@
 import type { PxWebNode, PxWebTableMetadata, PxWebQuery, PxWebResponse } from './types.js';
 
+// ─── Runtime shape guards ─────────────────────────────────────────────────────
+
+function assertPxWebResponse(raw: unknown, url: string): PxWebResponse {
+  if (typeof raw !== 'object' || raw === null) {
+    throw new Error(`PxWeb response from ${url} is not an object (got ${typeof raw})`);
+  }
+  const r = raw as Record<string, unknown>;
+  if (!Array.isArray(r['columns'])) {
+    throw new Error(`PxWeb response from ${url} missing "columns" array (schema may have changed)`);
+  }
+  if (!Array.isArray(r['data'])) {
+    throw new Error(`PxWeb response from ${url} missing "data" array (schema may have changed)`);
+  }
+  return raw as PxWebResponse;
+}
+
+function assertPxWebMetadata(raw: unknown, url: string): PxWebTableMetadata {
+  if (typeof raw !== 'object' || raw === null) {
+    throw new Error(`PxWeb metadata from ${url} is not an object (got ${typeof raw})`);
+  }
+  const r = raw as Record<string, unknown>;
+  if (!Array.isArray(r['variables'])) {
+    throw new Error(`PxWeb metadata from ${url} missing "variables" array (schema may have changed)`);
+  }
+  return raw as PxWebTableMetadata;
+}
+
 // Rate limit: 10 requests per 10-second sliding window (HTTP 429 on excess)
 const RATE_LIMIT_REQUESTS = 10;
 const RATE_LIMIT_WINDOW_MS = 10_000;
@@ -39,7 +66,9 @@ export class PxWebClient {
     ...levels: string[]
   ): Promise<PxWebTableMetadata> {
     const path = [database, ...levels, withPx(tableId)].join('/');
-    return this.get<PxWebTableMetadata>(`${BASE_URL}/fi/${path}`);
+    const url = `${BASE_URL}/fi/${path}`;
+    const raw = await this.get<unknown>(url);
+    return assertPxWebMetadata(raw, url);
   }
 
   /** Query a table for data (POST) */
@@ -50,7 +79,9 @@ export class PxWebClient {
     ...levels: string[]
   ): Promise<PxWebResponse> {
     const path = [database, ...levels, withPx(tableId)].join('/');
-    return this.post<PxWebResponse>(`${BASE_URL}/fi/${path}`, query);
+    const url = `${BASE_URL}/fi/${path}`;
+    const raw = await this.post<unknown>(url, query);
+    return assertPxWebResponse(raw, url);
   }
 
   private async get<T>(url: string): Promise<T> {

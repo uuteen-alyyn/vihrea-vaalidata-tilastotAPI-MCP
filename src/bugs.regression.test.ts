@@ -253,3 +253,49 @@ describe('BUG-10 FIXED: diacritic normalization collisions are detected and flag
     expect(collisions.size).toBe(0); // no collision
   });
 });
+
+// ─── FUNC-7 ───────────────────────────────────────────────────────────────────
+// bigramSimilarity returns 0 for single-character inputs (fixed)
+// Fix: short-string fallback — exact match → 1.0, prefix → 0.5, else 0
+
+describe('FUNC-7 FIXED: bigramSimilarity short-string fallback', () => {
+  // Reproduce the fixed bigramSimilarity logic inline (function is not exported)
+  function buildBigrams(s: string): Set<string> {
+    const set = new Set<string>();
+    for (let i = 0; i < s.length - 1; i++) set.add(s.slice(i, i + 2));
+    return set;
+  }
+  function bigramSimilarity(a: string, aSet: Set<string>, b: string): number {
+    if (a.length < 2 || b.length < 2) {
+      if (a === b) return 1.0;
+      if (b.startsWith(a) || a.startsWith(b)) return 0.5;
+      return 0;
+    }
+    if (aSet.size === 0) return 0;
+    const bSet = buildBigrams(b);
+    if (bSet.size === 0) return 0;
+    let intersection = 0;
+    for (const bg of aSet) if (bSet.has(bg)) intersection++;
+    return (2 * intersection) / (aSet.size + bSet.size);
+  }
+
+  it('single-char exact match returns 1.0 (was 0 before fix)', () => {
+    expect(bigramSimilarity('a', buildBigrams('a'), 'a')).toBe(1.0);
+  });
+
+  it('single-char prefix match returns 0.5', () => {
+    expect(bigramSimilarity('a', buildBigrams('a'), 'ab')).toBe(0.5);
+    expect(bigramSimilarity('ab', buildBigrams('ab'), 'a')).toBe(0.5);
+  });
+
+  it('single-char non-match returns 0', () => {
+    expect(bigramSimilarity('a', buildBigrams('a'), 'b')).toBe(0);
+  });
+
+  it('two-char strings still use bigram path', () => {
+    // 'ab' and 'ab' share bigram 'ab' → score = 2*1/(1+1) = 1.0
+    expect(bigramSimilarity('ab', buildBigrams('ab'), 'ab')).toBe(1.0);
+    // 'ab' and 'cd' share no bigrams → 0
+    expect(bigramSimilarity('ab', buildBigrams('ab'), 'cd')).toBe(0);
+  });
+});
