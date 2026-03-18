@@ -88,6 +88,10 @@ export function inferPartyAreaLevel(code: string, schema: PartyTableSchema): Are
       if (code === '00000') return 'koko_suomi';
       if (/^\d{5}$/.test(code) && code.endsWith('000')) return schema.aggregate_area_level;
       return 'kunta';
+    case 'vp_ku_prefix':
+      // Year-specific tables (13t2, 14vm, 14h2): SSS=national, VP##=vaalipiiri,
+      // KU###=kunta, 8-9 char alphanumeric=äänestysalue
+      return inferAreaLevelFromCandidateCode(code);
   }
 }
 

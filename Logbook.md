@@ -863,3 +863,80 @@ Single-year tables are unchanged (existing cache key pattern preserved).
 - Removed COST-3 and QUAL-6 from BACKLOG (both resolved in Phases 27 and 26 respectively).
 
 No code changes.
+
+---
+
+## PHASE 0: HTTP BODY BUG FIX — 2026-03-18
+
+**Problem:** `server-http.ts` called `transport.handleRequest(req, res)` while also registering a `req.on('data', ...)` listener for structured logging. Attaching a `data` listener puts the Node.js `IncomingMessage` into flowing mode. Hono's internal body reader (inside `StreamableHTTPServerTransport`) then receives an already-drained stream and silently gets empty input — causing all HTTP-mode tool calls to fail.
+
+**Root cause confirmed from MCP SDK source:** `StreamableHTTPServerTransport.handleRequest` accepts an optional third argument `parsedBody`. When provided, the SDK skips its own stream read. The SDK documentation even shows this pattern: `transport.handleRequest(req, res, req.body)`.
+
+**Fix:** Restructured `server-http.ts` request handler:
+1. `res.on('finish')` logger registered first (runs for all responses including 413/429).
+2. Security headers + content-length + rate-limit checks run synchronously (early return for rejected requests — no body listeners registered for these).
+3. For allowed requests: buffer body with `req.on('data')` → `req.on('end')` callback parses JSON for logging AND calls `transport.handleRequest(req, res, parsedBody)` with the pre-parsed body.
+
+**Files changed:** `src/server-http.ts` — restructured handler body order; added `parsedBody` as third arg to `transport.handleRequest`.
+
+**Test:** `npm run build` clean. `npm test` 138/138 passed.
+
+---
+
+## PHASE A: TABLE REGISTRY EXPANSION — 2026-03-18
+
+Implements phases A1, A2, A3, A5 from `Implementation_plan_dynamic_queries.md`.
+
+### A1: Year-specific party tables + routing
+
+**Problem:** Querying all areas from multi-year party tables (13sw, 14z7, 14gv) without an `areaId` filter exceeds PxWeb's cell-count limit (~12 000+ cells → HTTP 403). Year-specific tables (13t2, 14vm, 14h2) contain all area levels in one query within budget.
+
+**Routing rule:** `loadPartyResults` now checks: if `areaId` is omitted AND the exact year entry has a `party_by_aanestysalue` field → use the year-specific table. Otherwise use the multi-year table as before (unchanged for filtered queries).
+
+**New field added to `ElectionTableSet`:** `party_by_aanestysalue?: string` and `party_by_aanestysalue_schema?: PartyTableSchema`.
+
+**New area code format `'vp_ku_prefix'`:** Year-specific tables use `SSS`=national, `VP##`=vaalipiiri, `KU###`=kunta, else=äänestysalue — same as candidate table codes. Added this format to `PartyTableSchema.area_code_format` and to `inferPartyAreaLevel()` in `normalizer.ts`, which delegates to the existing `inferAreaLevelFromCandidateCode()`.
+
+**New year-specific schemas:** `PARLIAMENTARY_YEAR_PARTY_SCHEMA` (13t2), `MUNICIPAL_YEAR_PARTY_SCHEMA` (14vm), `EU_YEAR_PARTY_SCHEMA` (14h2).
+
+**Registered tables:**
+- `statfin_evaa_pxt_13t2` on parliamentary 2023 entry
+- `statfin_kvaa_pxt_14vm` on municipal 2025 entry
+- `statfin_euvaa_pxt_14h2` on EU 2024 entry
+
+### A2: EU candidate tables by area
+
+**New fields added to `ElectionTableSet`:** `candidate_by_vaalipiiri?: string` and `candidate_by_aanestysalue_eu?: string`.
+
+**Registered on EU 2024 entry:**
+- `statfin_euvaa_pxt_14gx` → `candidate_by_vaalipiiri` (all candidates, 14 vaalipiirit — no filter needed)
+- `statfin_euvaa_pxt_14gw` → `candidate_by_aanestysalue_eu` (requires `candidate_id` filter; 247 candidates × 2079 areas exceeds cell limit)
+
+Routing rules for these tables are documented in `election-tables.ts` comments — implementation of the routing in tools is part of Phase B (dynamic candidate resolver).
+
+### A3: Presidential multi-year vaalipiiri
+
+**New field added to `ElectionTableSet`:** `candidate_multiyr_vaalipiiri?: string`.
+
+**Registered:** `statfin_pvaa_pxt_14db` on presidential 2024 entry. Enables cross-year presidential candidate comparisons at vaalipiiri level (1994–2024).
+
+### A5: Election-type-aware year defaults
+
+**Problem:** `get_area_profile`, `compare_areas`, and `analyze_area_volatility` all hardcoded parliamentary year defaults (`[2011, 2015, 2019, 2023]`, `2023`). Called with `election_type: 'municipal'` without explicit years, they silently queried non-existent years and returned empty results.
+
+**Fix:** Added `DEFAULT_YEARS_BY_TYPE` constant in `src/tools/area/index.ts`:
+```
+parliamentary: [2011, 2015, 2019, 2023]
+municipal:     [2012, 2017, 2021, 2025]
+eu_parliament: [2009, 2014, 2019, 2024]
+regional:      [2022, 2025]
+presidential:  [2018, 2024]
+```
+
+- `analyze_area_volatility`: `years` defaults to `DEFAULT_YEARS_BY_TYPE[electionType]`
+- `get_area_profile`: `reference_year` defaults to last year for type; `history_years` defaults to last 3 years
+- `compare_areas`: `year` defaults to last year for type
+
+**Files changed:** `src/data/election-tables.ts`, `src/data/normalizer.ts`, `src/data/loaders.ts`, `src/tools/area/index.ts`.
+
+**Build:** clean. **Tests:** 138/138 passed (no regressions).

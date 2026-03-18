@@ -52,11 +52,13 @@ export interface PartyTableSchema {
   gender_total_code?: string;
   /**
    * Area code format:
-   *   'six_digit'  — 6-digit codes; national_code=national, ending-0000=aggregate, else=kunta
-   *   'vp_prefix'  — VP##=aggregate, 3-digit=kunta, national_code=national
-   *   'five_digit' — 5-digit codes; 00000=national, ending-000=aggregate, else=kunta (EU)
+   *   'six_digit'    — 6-digit codes; national_code=national, ending-0000=aggregate, else=kunta
+   *   'vp_prefix'    — VP##=aggregate, 3-digit=kunta, national_code=national
+   *   'five_digit'   — 5-digit codes; 00000=national, ending-000=aggregate, else=kunta (EU)
+   *   'vp_ku_prefix' — SSS=national, VP##=vaalipiiri, KU###=kunta, else=äänestysalue
+   *                    Used by year-specific all-areas tables (13t2, 14vm, 14h2).
    */
-  area_code_format: 'six_digit' | 'vp_prefix' | 'five_digit';
+  area_code_format: 'six_digit' | 'vp_prefix' | 'five_digit' | 'vp_ku_prefix';
   /** Area code that represents the national total */
   national_code: string;
   /** What geographic level does the per-4000 aggregate row represent? */
@@ -86,6 +88,30 @@ export interface ElectionTableSet {
   geographic_unit_type?: 'vaalipiiri' | 'hyvinvointialue' | 'national';
   /** Results analysis / comparison to prior election */
   results_analysis?: string;
+
+  /**
+   * Year-specific party table containing all area levels (national → vaalipiiri → kunta →
+   * äänestysalue) in one query. Used when areaId is omitted to avoid the 403 cell-count
+   * limit on multi-year tables (e.g. 13sw fetched for all areas exceeds ~12 000 cells).
+   * Tables: parliamentary 2023 → 13t2, municipal 2025 → 14vm, EU 2024 → 14h2.
+   */
+  party_by_aanestysalue?: string;
+  /** Schema for the year-specific all-areas party table. */
+  party_by_aanestysalue_schema?: PartyTableSchema;
+
+  /** EU-specific: candidate votes by vaalipiiri (14gx). All candidates, 14 areas. */
+  candidate_by_vaalipiiri?: string;
+  /**
+   * EU-specific: candidate votes by äänestysalue (14gw).
+   * Requires candidate_id filter — 247 candidates × 2079 areas exceeds cell limit.
+   */
+  candidate_by_aanestysalue_eu?: string;
+
+  /**
+   * Presidential/multi-year: candidate votes by vaalipiiri across years (14db).
+   * Enables cross-year presidential candidate comparisons at vaalipiiri level.
+   */
+  candidate_multiyr_vaalipiiri?: string;
 
   /**
    * Background characteristics of eligible voters, candidates & elected.
@@ -166,6 +192,55 @@ const EU_PARTY_SCHEMA: PartyTableSchema = {
   aggregate_area_level: 'vaalipiiri',
 };
 
+// ─── Year-specific all-areas party schemas ────────────────────────────────────
+//
+// These schemas describe tables that contain all area levels (national → vaalipiiri →
+// kunta → äänestysalue) in one PxWeb table. Used for all-areas queries to avoid the
+// 403 cell-count limit on multi-year tables. Area codes use the 'vp_ku_prefix' format:
+//   SSS = national, VP## = vaalipiiri, KU### = kunta, rest = äänestysalue.
+
+const PARLIAMENTARY_YEAR_PARTY_SCHEMA: PartyTableSchema = {
+  area_var:             'Alue/Äänestysalue',
+  party_var:            'Puolue',
+  measure_var:          'Tiedot',
+  votes_code:           'evaa_aanet',
+  share_code:           'evaa_osuus_aanista',
+  party_total_code:     'SSS',
+  gender_var:           'Ehdokkaan sukupuoli',
+  gender_total_code:    'SSS',
+  area_code_format:     'vp_ku_prefix',
+  national_code:        'SSS',
+  aggregate_area_level: 'vaalipiiri',
+};
+
+const MUNICIPAL_YEAR_PARTY_SCHEMA: PartyTableSchema = {
+  area_var:             'Äänestysalue',
+  party_var:            'Puolue',
+  measure_var:          'Tiedot',
+  votes_code:           'aanet_yht',
+  share_code:           'osuus_aanista',
+  party_total_code:     'SSS',
+  gender_var:           'Ehdokkaan sukupuoli',
+  gender_total_code:    'SSS',
+  area_code_format:     'vp_ku_prefix',
+  national_code:        'SSS',
+  aggregate_area_level: 'vaalipiiri',
+};
+
+const EU_YEAR_PARTY_SCHEMA: PartyTableSchema = {
+  area_var:             'Äänestysalue',
+  party_var:            'Puolue',
+  measure_var:          'Tiedot',
+  votes_code:           'euvaa_aanet',
+  share_code:           'euvaa_osuus_aanista',
+  party_total_code:     '00',
+  gender_var:           'Sukupuoli',
+  gender_total_code:    'SSS',
+  area_code_format:     'vp_ku_prefix',
+  national_code:        'SSS',
+  aggregate_area_level: 'vaalipiiri',
+};
+
 // ─── Parliamentary elections (Eduskuntavaalit) ────────────────────────────────
 // Base path: StatFin/evaa/  (archive: StatFin_Passiivi/evaa/)
 
@@ -176,6 +251,9 @@ export const PARLIAMENTARY_TABLES: ElectionTableSet[] = [
     database: DATABASE.active,
     party_by_kunta:   'statfin_evaa_pxt_13sw',     // 1983–2023
     party_schema:     PARLIAMENTARY_PARTY_SCHEMA,
+    // Year-specific all-areas table: use when areaId is omitted to avoid 403 on 13sw
+    party_by_aanestysalue:        'statfin_evaa_pxt_13t2',
+    party_by_aanestysalue_schema: PARLIAMENTARY_YEAR_PARTY_SCHEMA,
     turnout_by_aanestysalue: 'statfin_evaa_pxt_13sx',
     geographic_unit_type: 'vaalipiiri',
     candidate_by_aanestysalue: {
@@ -318,6 +396,9 @@ export const MUNICIPAL_TABLES: ElectionTableSet[] = [
     database: DATABASE.active,
     party_by_kunta: 'statfin_kvaa_pxt_14z7',       // 1976–2025, covers all municipal years
     party_schema:   MUNICIPAL_PARTY_SCHEMA,
+    // Year-specific all-areas table: use when areaId is omitted to avoid 403 on 14z7
+    party_by_aanestysalue:        'statfin_kvaa_pxt_14vm',
+    party_by_aanestysalue_schema: MUNICIPAL_YEAR_PARTY_SCHEMA,
     turnout_by_aanestysalue: 'statfin_kvaa_pxt_14vl',
     geographic_unit_type: 'vaalipiiri',
     candidate_by_aanestysalue: {
@@ -426,7 +507,13 @@ export const EU_TABLES: ElectionTableSet[] = [
     database: DATABASE.active,
     party_by_kunta:    'statfin_euvaa_pxt_14gv',    // 1996–2024, covers all EU years
     party_schema:      EU_PARTY_SCHEMA,
+    // Year-specific all-areas table: use when areaId is omitted to avoid 403 on 14gv
+    party_by_aanestysalue:        'statfin_euvaa_pxt_14h2',
+    party_by_aanestysalue_schema: EU_YEAR_PARTY_SCHEMA,
     candidate_national: 'statfin_euvaa_pxt_14gy',   // all candidates, national totals only
+    // EU candidate tables by area (A2)
+    candidate_by_vaalipiiri:         'statfin_euvaa_pxt_14gx',  // all candidates, 14 vaalipiirit
+    candidate_by_aanestysalue_eu:    'statfin_euvaa_pxt_14gw',  // requires candidate_id filter
     geographic_unit_type: 'national',
     voter_turnout_by_demographics: {
       age_group:       'statfin_euvaa_pxt_14ha',
@@ -457,6 +544,8 @@ export const PRESIDENTIAL_TABLES: ElectionTableSet[] = [
     // No party dimension in presidential elections
     // All areas (national + vaalipiiri + kunta + äänestysalue) in one table
     candidate_national: 'statfin_pvaa_pxt_14d5',
+    // Multi-year vaalipiiri table: candidate votes by vaalipiiri, 1994–2024 (A3)
+    candidate_multiyr_vaalipiiri: 'statfin_pvaa_pxt_14db',
     geographic_unit_type: 'national',
     turnout_by_aanestysalue: 'statfin_pvaa_pxt_14d6',
     voter_turnout_by_demographics: {

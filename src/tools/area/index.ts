@@ -9,6 +9,19 @@ import { ELECTION_TYPE_PARAM, subnatLevel, matchesParty, pct, round2, mcpText, e
 const ALL_PARL_YEARS = [1983, 1987, 1991, 1995, 1999, 2003, 2007, 2011, 2015, 2019, 2023];
 
 /**
+ * Default election years per type — used when the caller does not specify years.
+ * A5: prevents tools from silently querying parliamentary years for non-parliamentary
+ * election types (which returns empty results with no error).
+ */
+const DEFAULT_YEARS_BY_TYPE: Record<ElectionType, number[]> = {
+  parliamentary: [2011, 2015, 2019, 2023],
+  municipal:     [2012, 2017, 2021, 2025],
+  eu_parliament: [2009, 2014, 2019, 2024],
+  regional:      [2022, 2025],
+  presidential:  [2018, 2024],
+};
+
+/**
  * Pedersen volatility index: sum of |share_t - share_{t-1}| / 2
  * Measures total electoral change between two elections.
  * Range: 0 (identical) to 100 (complete replacement of parties).
@@ -54,10 +67,13 @@ export function registerAreaTools(server: McpServer): void {
       history_years: z.array(z.number()).optional().describe('Additional election years to include in the historical trend.'),
       top_n: z.number().optional().describe('Number of top parties to show. Defaults to 5.'),
     },
-    async ({ area_id, election_type, reference_year = 2023, history_years, top_n = 5 }) => {
+    async ({ area_id, election_type, reference_year, history_years, top_n = 5 }) => {
       const electionType: ElectionType = election_type ?? 'parliamentary';
-      const years = history_years ?? [2015, 2019, 2023];
-      if (!years.includes(reference_year)) years.push(reference_year);
+      const typeYears = DEFAULT_YEARS_BY_TYPE[electionType];
+      const defaultRefYear = typeYears[typeYears.length - 1]!;
+      const resolvedRefYear = reference_year ?? defaultRefYear;
+      const years = history_years ?? typeYears.slice(-3);
+      if (!years.includes(resolvedRefYear)) years.push(resolvedRefYear);
       years.sort((a, b) => a - b);
 
       // Fetch data for all requested years
@@ -77,7 +93,7 @@ export function registerAreaTools(server: McpServer): void {
       if (yearData.length === 0) return errResult(`No party data found for area ${area_id}.`);
 
       // Reference year parties (top N)
-      const refYear = yearData.find(d => d.year === reference_year) ?? yearData[yearData.length - 1]!;
+      const refYear = yearData.find(d => d.year === resolvedRefYear) ?? yearData[yearData.length - 1]!;
       const refRows = refYear.rows.filter(r => r.area_id === area_id);
 
       if (refRows.length === 0) {
@@ -148,7 +164,7 @@ export function registerAreaTools(server: McpServer): void {
         top_parties: topParties,
         historical_trend: trend,
         // POL-5: survivorship bias warning — trend tracks current top parties only
-        historical_trend_caveat: `historical_trend tracks the top ${top_n} parties from the reference year (${refYear.year}) only. Parties that were strong in earlier years but declined or exited are not shown — the trend therefore skews toward parties with sustained recent success. For full historical party landscape use compare_elections or analyze_area_volatility.`,
+        historical_trend_caveat: `historical_trend tracks the top ${top_n} parties from the reference year (${resolvedRefYear}) only. Parties that were strong in earlier years but declined or exited are not shown — the trend therefore skews toward parties with sustained recent success. For full historical party landscape use compare_elections or analyze_area_volatility.`,
         volatility: {
           by_election: volatility,
           average_pedersen_index: avgVolatility,
@@ -173,16 +189,18 @@ export function registerAreaTools(server: McpServer): void {
     {
       area_ids: z.array(z.string()).min(2).max(8).describe('List of area codes (2–8). Use resolve_area to find codes.'),
       election_type: ELECTION_TYPE_PARAM,
-      year: z.number().optional().describe('Election year. Defaults to 2023.'),
+      year: z.number().optional().describe('Election year. Defaults to the most recent year for the given election_type.'),
       top_n: z.number().optional().describe('Number of top parties to show per area. Defaults to 5.'),
     },
-    async ({ area_ids, election_type, year = 2023, top_n = 5 }) => {
+    async ({ area_ids, election_type, year, top_n = 5 }) => {
       const electionType: ElectionType = election_type ?? 'parliamentary';
+      const typeYears = DEFAULT_YEARS_BY_TYPE[electionType];
+      const resolvedYear = year ?? typeYears[typeYears.length - 1]!;
       let allRows: ElectionRecord[];
       let tableId: string;
 
       try {
-        const result = await loadPartyResults(year, undefined, electionType);
+        const result = await loadPartyResults(resolvedYear, undefined, electionType);
         allRows = result.rows;
         tableId = result.tableId;
       } catch (err) {
@@ -191,7 +209,7 @@ export function registerAreaTools(server: McpServer): void {
 
       const areas = area_ids.map(area_id => {
         const areaRows = allRows.filter(r => r.area_id === area_id && r.party_id);
-        if (areaRows.length === 0) return { area_id, error: `Area ${area_id} not found in ${year} data.` };
+        if (areaRows.length === 0) return { area_id, error: `Area ${area_id} not found in ${resolvedYear} data.` };
 
         const areaName = areaRows[0]!.area_name;
         const areaLevel = areaRows[0]!.area_level;
@@ -222,7 +240,7 @@ export function registerAreaTools(server: McpServer): void {
         }));
 
       return mcpText({
-        year,
+        year: resolvedYear,
         election_type: electionType,
         areas,
         leading_parties_summary: leading_parties,
@@ -238,11 +256,12 @@ export function registerAreaTools(server: McpServer): void {
     {
       area_id: z.string().describe('Area code (e.g. "010091" for Helsinki kunta).'),
       election_type: ELECTION_TYPE_PARAM,
-      years: z.array(z.number()).optional().describe('Election years to include. Defaults to [2011, 2015, 2019, 2023] for parliamentary.'),
+      years: z.array(z.number()).optional().describe('Election years to include. Defaults to the most recent 4 years for the given election_type.'),
     },
-    async ({ area_id, election_type, years = [2011, 2015, 2019, 2023] }) => {
+    async ({ area_id, election_type, years }) => {
       const electionType: ElectionType = election_type ?? 'parliamentary';
-      const sortedYears = [...years].sort((a, b) => a - b);
+      const resolvedYears = years ?? DEFAULT_YEARS_BY_TYPE[electionType];
+      const sortedYears = [...resolvedYears].sort((a, b) => a - b);
       const yearData: Array<{ year: number; rows: ElectionRecord[] }> = [];
       let tableId = '';
 

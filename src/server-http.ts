@@ -138,25 +138,12 @@ const httpServer = http.createServer((req, res) => {
   const start    = Date.now();
   const clientIp = getClientIp(req);
 
-  // NEW-SEC-7: Structured access logging — capture tool name and sanitized args
-  // from MCP JSON body. We listen on 'data' alongside the transport; Node.js
-  // EventEmitter broadcasts to all listeners, so both collectors see every chunk.
+  // NEW-SEC-7: Structured access logging — populated inside the body buffer
+  // callback below after we parse the MCP JSON request.
   let toolName = '';
   let toolArgsSummary = '';
-  const bodyChunks: Buffer[] = [];
-  req.on('data', (chunk: Buffer) => bodyChunks.push(chunk));
-  req.on('end', () => {
-    try {
-      const parsed = JSON.parse(Buffer.concat(bodyChunks).toString('utf8')) as Record<string, unknown>;
-      const params = parsed['params'] as Record<string, unknown> | undefined;
-      if (parsed['method'] === 'tools/call' && typeof params?.['name'] === 'string') {
-        toolName = sanitizeForLog(params['name']);
-        const args = params['arguments'];
-        toolArgsSummary = sanitizeForLog(JSON.stringify(args ?? {}));
-      }
-    } catch { /* not JSON or not a tool call — omit from log */ }
-  });
 
+  // Always register finish listener first so it fires even for rejected requests.
   res.on('finish', () => {
     const duration = Date.now() - start;
     const toolPart = toolName ? ` tool=${toolName} args=${toolArgsSummary}` : '';
@@ -167,7 +154,7 @@ const httpServer = http.createServer((req, res) => {
   // responses also pick these up because setHeader() writes to the same object.
   setSecurityHeaders(res);
 
-  // Reject oversized requests before passing to the transport.
+  // Reject oversized requests before buffering the body.
   const contentLength = parseInt(req.headers['content-length'] ?? '0', 10);
   if (contentLength > MAX_BODY_BYTES) {
     const body = JSON.stringify({ error: 'Request body too large' });
@@ -193,7 +180,30 @@ const httpServer = http.createServer((req, res) => {
     return;
   }
 
-  transport.handleRequest(req, res);
+  // Buffer the full request body before passing to the transport.
+  //
+  // Passing parsedBody as the third argument to transport.handleRequest lets the
+  // MCP SDK skip its own body-stream read — which is required because attaching
+  // our 'data' listener here puts the IncomingMessage into flowing mode before
+  // Hono's internal body reader inside the transport runs. Without this, the
+  // transport receives an already-drained stream and silently gets empty input,
+  // causing all HTTP-mode tool calls to fail.
+  const bodyChunks: Buffer[] = [];
+  req.on('data', (chunk: Buffer) => bodyChunks.push(chunk));
+  req.on('end', () => {
+    let parsedBody: Record<string, unknown> | undefined;
+    try {
+      const parsed = JSON.parse(Buffer.concat(bodyChunks).toString('utf8')) as Record<string, unknown>;
+      parsedBody = parsed;
+      const params = parsed['params'] as Record<string, unknown> | undefined;
+      if (parsed['method'] === 'tools/call' && typeof params?.['name'] === 'string') {
+        toolName = sanitizeForLog(params['name']);
+        const args = params['arguments'];
+        toolArgsSummary = sanitizeForLog(JSON.stringify(args ?? {}));
+      }
+    } catch { /* not JSON or not a tool call — omit from log */ }
+    transport.handleRequest(req, res, parsedBody);
+  });
 });
 
 httpServer.listen(PORT, () => {

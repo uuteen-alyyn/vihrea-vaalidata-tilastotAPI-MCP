@@ -80,9 +80,48 @@ export async function loadPartyResults(
   areaId?: string,
   electionType: ElectionType = 'parliamentary'
 ): Promise<LoadResult> {
+  const exact = getElectionTables(electionType, year);
+
+  // A1 routing: when areaId is omitted (all-areas query) and a year-specific table
+  // exists, use it to avoid the 403 cell-count limit on multi-year tables.
+  // Multi-year tables (13sw, 14z7, 14gv) with all areas at once exceed PxWeb's limit
+  // (~305 areas × 20 parties × 2 measures ≈ 12 000+ cells). Year-specific tables
+  // (13t2, 14vm, 14h2) contain all area levels within the cell budget.
+  if (!areaId && exact?.party_by_aanestysalue && exact.party_by_aanestysalue_schema) {
+    const schema    = exact.party_by_aanestysalue_schema;
+    const dbPath    = getDatabasePath(exact);
+    const tableId   = exact.party_by_aanestysalue;
+    const metadata  = await fetchMetadataCached(dbPath, tableId);
+
+    type FilterItem = { code: string; selection: { filter: 'item' | 'all'; values: string[] } };
+    const filters: FilterItem[] = [];
+
+    if (schema.gender_var && schema.gender_total_code) {
+      filters.push({ code: schema.gender_var, selection: { filter: 'item', values: [schema.gender_total_code] } });
+    }
+    filters.push({ code: schema.party_var, selection: { filter: 'all', values: ['*'] } });
+    filters.push({ code: schema.area_var,  selection: { filter: 'all', values: ['*'] } });
+    filters.push({ code: schema.measure_var, selection: { filter: 'item', values: [schema.votes_code, schema.share_code] } });
+
+    // Year filter if table has Vuosi variable
+    if (metadata.variables.some((v) => v.code === 'Vuosi')) {
+      filters.push({ code: 'Vuosi', selection: { filter: 'item', values: [String(year)] } });
+    }
+
+    const query    = { query: filters, response: { format: 'json' as const } };
+    const cacheKey = `data:${tableId}:${electionType}:${year}:all`;
+
+    const { value: response, cache_hit } = await withCache(cacheKey, () =>
+      pxwebClient.queryTable(dbPath, tableId, query)
+    );
+
+    const rows = normalizePartyTable(response, metadata, year, electionType, schema);
+    return { rows, tableId, cache_hit };
+  }
+
+  // Standard path: use multi-year table (filtered to one area, or with year filter)
   // If the exact year entry has no party table, fall back to the multi-year table
   // registered on the most recent entry (e.g. 14z7 covers all municipal years).
-  const exact = getElectionTables(electionType, year);
   const tables = (exact?.party_by_kunta ? exact : null) ?? findPartyTableForType(electionType);
   if (!tables?.party_by_kunta || !tables.party_schema) {
     throw new Error(`No party table for ${electionType} ${year}`);
