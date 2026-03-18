@@ -198,6 +198,85 @@ export const PARLIAMENTARY_TABLES: ElectionTableSet[] = [
     },
     results_analysis: '810_evaa_2019_tau_153',
   },
+  {
+    election_type: 'parliamentary',
+    year: 2015,
+    database: DATABASE.archive,
+    // party_by_kunta: covered by 13sw (1983–2023) via 2023 entry fallback
+    geographic_unit_type: 'vaalipiiri',
+    candidate_by_aanestysalue: {
+      // Same 13-vaalipiiri boundaries as 2019. Format: Äänestysalue + Äänestystiedot (Sar1=votes, Sar2=share)
+      'helsinki':       '170_evaa_tau_170',
+      'uusimaa':        '171_evaa_tau_171',
+      'lounais-suomi':  '172_evaa_tau_172',   // Varsinais-Suomen vaalipiiri
+      'satakunta':      '173_evaa_tau_173',
+      'hame':           '174_evaa_tau_174',
+      'pirkanmaa':      '175_evaa_tau_175',
+      'kaakkois-suomi': '176_evaa_tau_176',
+      'savo-karjala':   '177_evaa_tau_177',
+      'vaasa':          '178_evaa_tau_178',
+      'keski-suomi':    '179_evaa_tau_179',
+      'oulu':           '180_evaa_tau_180',
+      'lappi':          '181_evaa_tau_181',
+      'ahvenanmaa':     '182_evaa_tau_182',
+    },
+  },
+  {
+    election_type: 'parliamentary',
+    year: 2011,
+    database: DATABASE.archive,
+    // party_by_kunta: covered by 13sw (1983–2023) via 2023 entry fallback
+    geographic_unit_type: 'vaalipiiri',
+    candidate_by_aanestysalue: {
+      // NOTE: Finland had 15 vaalipiiri before the 2012 boundary reform.
+      // Three merged pairs:
+      //   kymi + mikkeli → kaakkois-suomi (2015+)
+      //   etela-savo + pohjois-savo + pohjois-karjala → savo-karjala (2015+)
+      // Use the old district names as keys; callers must use these keys for 2011/2007.
+      // Format: Äänestysalue + Äänestystiedot (Sar1=votes, Sar2=share)
+      'helsinki':        '170_evaa_tau_170_fi',
+      'uusimaa':         '171_evaa_tau_171_fi',
+      'lounais-suomi':   '172_evaa_tau_172_fi',   // Varsinais-Suomen vaalipiiri
+      'satakunta':       '173_evaa_tau_173_fi',
+      'hame':            '174_evaa_tau_174_fi',
+      'pirkanmaa':       '175_evaa_tau_175_fi',
+      'kymi':            '176_evaa_tau_176_fi',    // Kymen vaalipiiri (→ kaakkois-suomi 2015)
+      'etela-savo':      '177_evaa_tau_177_fi',    // Etelä-Savon vaalipiiri (→ savo-karjala 2015)
+      'pohjois-savo':    '178_evaa_tau_178_fi',    // Pohjois-Savon vaalipiiri (→ savo-karjala 2015)
+      'pohjois-karjala': '179_evaa_tau_179_fi',    // Pohjois-Karjalan vaalipiiri (→ savo-karjala 2015)
+      'vaasa':           '180_evaa_tau_180_fi',
+      'keski-suomi':     '181_evaa_tau_181_fi',
+      'oulu':            '182_evaa_tau_182_fi',
+      'lappi':           '183_evaa_tau_183_fi',
+      'ahvenanmaa':      '184_evaa_tau_184_fi',
+    },
+  },
+  {
+    election_type: 'parliamentary',
+    year: 2007,
+    database: DATABASE.archive,
+    // party_by_kunta: covered by 13sw (1983–2023) via 2023 entry fallback
+    geographic_unit_type: 'vaalipiiri',
+    candidate_by_aanestysalue: {
+      // Same 15-vaalipiiri boundaries as 2011. Format: Alue + Äänestystiedot (Sar3=votes, Sar4=share)
+      // Note: area variable code is 'Alue' (not 'Äänestysalue') — handled automatically by loader.
+      'helsinki':        'oi57_statfin_ehdok01_2007_fi',
+      'uusimaa':         'oi57_statfin_ehdok02_2007_fi',
+      'lounais-suomi':   'oi57_statfin_ehdok03_2007_fi',   // Varsinais-Suomen vaalipiiri
+      'satakunta':       'oi57_statfin_ehdok04_2007_fi',
+      'ahvenanmaa':      'oi57_statfin_ehdok05_2007_fi',
+      'hame':            'oi57_statfin_ehdok06_2007_fi',
+      'pirkanmaa':       'oi57_statfin_ehdok07_2007_fi',
+      'kymi':            'oi57_statfin_ehdok08_2007_fi',    // Kymen vaalipiiri (→ kaakkois-suomi 2015)
+      'etela-savo':      'oi57_statfin_ehdok09_2007_fi',   // Etelä-Savon vaalipiiri (→ savo-karjala 2015)
+      'pohjois-savo':    'oi57_statfin_ehdok10_2007_fi',   // Pohjois-Savon vaalipiiri (→ savo-karjala 2015)
+      'pohjois-karjala': 'oi57_statfin_ehdok11_2007_fi',   // Pohjois-Karjalan vaalipiiri (→ savo-karjala 2015)
+      'vaasa':           'oi57_statfin_ehdok12_2007_fi',
+      'keski-suomi':     'oi57_statfin_ehdok13_2007_fi',
+      'oulu':            'oi57_statfin_ehdok14_2007_fi',
+      'lappi':           'oi57_statfin_ehdok15_2007_fi',
+    },
+  },
 ];
 
 // ─── Municipal elections (Kuntavaalit) ────────────────────────────────────────

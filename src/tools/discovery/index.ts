@@ -131,6 +131,14 @@ export function registerDiscoveryTools(server: McpServer): void {
       if (tables.election_type === 'presidential') {
         caveats.push('Presidential elections have two rounds. Use the round parameter (1 or 2) to filter.');
       }
+      if (tables.election_type === 'parliamentary' && (tables.year === 2011 || tables.year === 2007)) {
+        caveats.push(
+          `Finland had 15 vaalipiiri in ${tables.year} (before the 2012 boundary reform). ` +
+          'The old districts kymi, etela-savo, pohjois-savo, and pohjois-karjala were later merged ' +
+          'into kaakkois-suomi and savo-karjala (2015+). Use the 2011/2007 keys listed in ' +
+          'candidate_vaalipiirit when querying this election.'
+        );
+      }
 
       return {
         content: [{

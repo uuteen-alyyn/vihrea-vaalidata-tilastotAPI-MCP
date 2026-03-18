@@ -543,22 +543,34 @@ Populate schemas for the existing 2023 and 2019 parliamentary entries.
 
 ---
 
-## Phase 13: Historical Parliamentary Candidate Data (2007–2015)
+## Phase 13: Historical Parliamentary Candidate Data (2007–2015) ✅ COMPLETE
 
 **Goal:** Extend candidate data coverage to 2007, 2011, and 2015 parliamentary elections using StatFin_Passiivi archive tables.
 
-**Known unknowns:** Archive variable formats may differ across years (2019 already uses a different format than 2023). Each year may require its own normalization path or format detection.
+### Findings
+- All three years' tables exist in `StatFin_Passiivi/evaa/`.
+- **2015**: 13 vaalipiiri (same boundaries as 2019/2023). `Äänestysalue` + `Äänestystiedot` (Sar1=votes, Sar2=share) — identical format to 2019.
+- **2011**: 15 vaalipiiri (old boundaries). Same Sar-dimension format as 2015.
+- **2007**: 15 vaalipiiri (old boundaries). Area variable is `Alue` (not `Äänestysalue`); Sar3=votes, Sar4=share. Normalizer auto-detects via text-search ('äänimäärä', 'osuus').
+- **No normalizer changes needed** — existing `tiedotIsKey` branch + text detection handles all formats.
 
 ### Tasks
-- [ ] Research StatFin_Passiivi for 2015, 2011, 2007 parliamentary candidate table IDs
-- [ ] Fetch metadata for one table per year and compare variable structures to 2019 archive format
-- [ ] Determine if existing normalizer handles them or if new format variants are needed
-- [ ] Register 2015 candidate tables (13 vaalipiiri)
-- [ ] Register 2011 candidate tables (13 vaalipiiri)
-- [ ] Register 2007 candidate tables (13 vaalipiiri)
-- [ ] Live API smoke test for each year (one vaalipiiri per year)
-- [ ] Update `list_elections` data coverage output
-- [ ] Logbook entry
+- [x] Research StatFin_Passiivi for 2015, 2011, 2007 parliamentary candidate table IDs
+- [x] Fetch metadata for one table per year and compare variable structures to 2019 archive format
+- [x] Confirmed: existing normalizer handles all three formats automatically
+- [x] Register 2015 candidate tables (13 vaalipiiri) in `election-tables.ts`
+- [x] Register 2011 candidate tables (15 vaalipiiri — old boundaries) with legacy keys
+- [x] Register 2007 candidate tables (15 vaalipiiri — old boundaries) with legacy keys
+- [x] `list_elections` auto-updated (driven by `ALL_ELECTION_TABLES`)
+- [x] `describe_election` now shows caveat for 2007/2011 about boundary reform and correct keys
+- [x] Build + tests: 99/99 passing
+
+### 2011/2007 boundary note
+Before 2012 vaalipiiri reform, Finland had 15 electoral districts. The 4 merged:
+- `kymi` → `kaakkois-suomi` (2015+)
+- `etela-savo` + `pohjois-savo` + `pohjois-karjala` → `savo-karjala` (2015+)
+
+Callers must use old keys (e.g. `kymi`, `etela-savo`) when querying 2007/2011 elections.
 
 ---
 

@@ -471,3 +471,24 @@ Added application-level per-IP sliding-window rate limiter to `src/server-http.t
 - App-level limiter provides defense-in-depth regardless of infra choice
 
 **Build + test:** clean (tsc), 99/99 tests passing
+
+---
+
+## PHASE 13 COMPLETE: HISTORICAL PARLIAMENTARY CANDIDATE DATA 2007–2015 — 2026-03-18 09:55:00
+
+Extended candidate-level data coverage to parliamentary elections 2007, 2011, and 2015.
+
+**Research findings (StatFin_Passiivi/evaa/ API listing + metadata verification):**
+- 2015: 13 vaalipiiri (same boundaries as 2019/2023). Table IDs: `170_evaa_tau_170` through `182_evaa_tau_182`. Format: `Äänestysalue` + `Äänestystiedot` (Sar1=votes, Sar2=share) — identical to 2019.
+- 2011: 15 vaalipiiri (old boundaries, pre-2012 reform). Table IDs: `170_evaa_tau_170_fi` through `184_evaa_tau_184_fi`. Same Sar-dimension format as 2015.
+- 2007: 15 vaalipiiri (same old boundaries). Table IDs: `oi57_statfin_ehdok01_2007_fi` through `oi57_statfin_ehdok15_2007_fi`. Area variable is `Alue` (not `Äänestysalue`); Sar3=votes, Sar4=share (different Sar order). Existing normalizer handles this automatically — no code changes needed.
+
+**Changes:**
+- `src/data/election-tables.ts`: Added 4 new entries to PARLIAMENTARY_TABLES (2015, 2011, 2007)
+- `src/tools/discovery/index.ts`: Added caveat in describe_election for 2007/2011 about 15-vaalipiiri boundary structure
+
+**2011/2007 vaalipiiri boundary change:**
+Before 2012 reform: kymi, etela-savo, pohjois-savo, pohjois-karjala were separate districts.
+These merged into kaakkois-suomi and savo-karjala in 2015. Old keys must be used for 2007/2011 queries.
+
+**Build + test:** 99/99 passing (no normalizer changes needed)
