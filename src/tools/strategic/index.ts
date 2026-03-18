@@ -15,6 +15,12 @@ function normalizeCandidateName(name: string | undefined): string {
   return name.toLowerCase().replace(/ä/g, 'a').replace(/ö/g, 'o').replace(/å/g, 'a').replace(/\s+/g, ' ').trim();
 }
 
+/** Minimum absolute vote change on the losing side required to classify co-movement as
+ *  'consistent_with_transfer'. Filters out noise cases where 1–2 vote fluctuations
+ *  would otherwise be counted as transfer evidence.
+ */
+const MIN_TRANSFER_VOTES = 50;
+
 // ─── Tool registration ────────────────────────────────────────────────────────
 
 export function registerStrategicTools(server: McpServer): void {
@@ -69,9 +75,16 @@ export function registerStrategicTools(server: McpServer): void {
       }
 
       // Match candidates by normalized name — candidate IDs are re-issued each election
-      const toCandidateNames = new Set(
-        toRows.map((r) => normalizeCandidateName(r.candidate_name)).filter(Boolean)
-      );
+      const toNormalizedNames = toRows.map((r) => normalizeCandidateName(r.candidate_name)).filter(Boolean);
+      const toCandidateNames = new Set(toNormalizedNames);
+
+      // Detect normalization collisions (e.g. "Mäki" and "Maki" both → "maki")
+      const nameSeen = new Set<string>();
+      const collisionNames = new Set<string>();
+      for (const n of toNormalizedNames) {
+        if (nameSeen.has(n)) collisionNames.add(n);
+        nameSeen.add(n);
+      }
 
       // Get unit-level totals from from_year for each candidate
       const unitAreaLevel = electionType === 'regional' ? 'hyvinvointialue' as const
@@ -126,9 +139,12 @@ export function registerStrategicTools(server: McpServer): void {
         unit_key: unitLabel,
         party_id: party_id ?? 'all',
         n_inactive_candidates: result.length,
-        total_orphaned_votes: totalOrphanedVotes,
+        total_votes_from_inactive_candidates: totalOrphanedVotes,
         inactive_candidates: result,
-        strategic_note: `These candidates had ${totalOrphanedVotes.toLocaleString()} combined votes in ${from_year} and did not run in ${to_year}. Their vote pools may be available to other candidates in overlapping geographic areas.`,
+        ...(collisionNames.size > 0 ? {
+          name_normalization_warning: `${collisionNames.size} normalized name collision(s) detected — distinct candidates share the same normalized form (e.g. "Mäki" and "Maki" both normalize to "maki"). Active/inactive status for these candidates may be incorrect.`,
+        } : {}),
+        strategic_note: `These candidates had ${totalOrphanedVotes.toLocaleString()} combined votes in ${from_year} and did not run in ${to_year}. Research on Finnish open-list PR elections suggests personal votes are partially but not fully transferable when a candidate does not run again. Treat these figures as an upper bound on transferable support rather than a guaranteed vote pool. Cross-reference with find_area_overperformance to identify areas where a new candidate might absorb these votes.`,
         method: {
           description: 'Inactive = candidate name present in from_year but absent in to_year (normalized name match — candidate IDs differ between elections). Votes from unit-level aggregate row.',
           source_table: fromTableId,
@@ -200,8 +216,12 @@ export function registerStrategicTools(server: McpServer): void {
         .sort((a, b) => (b.vote_share_loss_pp ?? 0) - (a.vote_share_loss_pp ?? 0))
         .slice(0, limit);
 
-      const totalLostVotes = exposed.reduce(
-        (s, a) => s + ((a.votes_year1 ?? 0) - (a.votes_year2 ?? 0)),
+      const netVoteCountChange = exposed.reduce(
+        (s, a) => s + ((a.votes_year2 ?? 0) - (a.votes_year1 ?? 0)),
+        0
+      );
+      const totalSharePointsLost = exposed.reduce(
+        (s, a) => s + (a.vote_share_loss_pp ?? 0),
         0
       );
 
@@ -211,9 +231,11 @@ export function registerStrategicTools(server: McpServer): void {
         year2,
         min_vote_loss_pp,
         n_exposed_areas: exposed.length,
-        total_estimated_lost_votes: totalLostVotes,
+        net_vote_count_change_in_exposed_areas: netVoteCountChange,
+        net_vote_count_change_note: 'Positive = raw votes gained; negative = raw votes lost. Can be positive even when share fell (e.g. higher turnout). Not equivalent to "lost votes".',
+        total_share_points_lost_in_exposed_areas: round2(totalSharePointsLost),
         exposed_areas: exposed,
-        strategic_note: `These ${exposed.length} areas saw ${party_id} lose ≥${min_vote_loss_pp}pp between ${year1} and ${year2}. They represent areas where ${party_id} support is structurally weaker and voters may be persuadable.`,
+        strategic_note: `These ${exposed.length} areas saw ${party_id} lose ≥${min_vote_loss_pp}pp of vote share between ${year1} and ${year2}, representing structural weakening. The cause may be demobilisation (own voters abstaining) or persuasion loss (voters switching to another party) — cross-reference with estimate_vote_transfer_proxy and get_turnout to distinguish these scenarios before targeting campaign resources.`,
         method: {
           description: `Exposed = ${areaLvl} where party vote share fell by ≥ min_vote_loss_pp between year1 and year2.`,
           source_table: tableId,
@@ -287,7 +309,14 @@ export function registerStrategicTools(server: McpServer): void {
             gainer_votes_year2: g2?.votes ?? null,
             gainer_change,
             co_movement: (loser_change !== null && gainer_change !== null)
-              ? (loser_change < 0 && gainer_change > 0 ? 'consistent_with_transfer' : 'inconsistent')
+              ? (
+                  loser_change < 0 &&
+                  gainer_change > 0 &&
+                  Math.abs(loser_change) >= MIN_TRANSFER_VOTES &&
+                  gainer_change >= 0.1 * Math.abs(loser_change)
+                    ? 'consistent_with_transfer'
+                    : 'inconsistent'
+                )
               : 'insufficient_data',
           };
         })
@@ -328,14 +357,16 @@ export function registerStrategicTools(server: McpServer): void {
           n_inconsistent: inconsistent.length,
           pct_consistent: areaAnalysis.length > 0
             ? pct(consistent.length / areaAnalysis.length * 100) : null,
+          pct_consistent_caution: 'This percentage counts areas where both conditions are directionally met (loser lost ≥50 votes AND gainer gained ≥10% of loser loss). It is NOT a probability of voter transfer. Even unrelated parties show co-movement when both track a national swing.',
         },
         top_transfer_areas: consistent
           .sort((a, b) => Math.abs(b.loser_change ?? 0) - Math.abs(a.loser_change ?? 0))
           .slice(0, 10),
         interpretation: [
-          `In ${consistent.length} of ${areaAnalysis.length} municipalities, ${losing_party_id} lost votes while ${gaining_party_id} gained votes — consistent with a transfer pattern.`,
+          `In ${consistent.length} of ${areaAnalysis.length} municipalities, ${losing_party_id} lost ≥50 votes while ${gaining_party_id} gained ≥10% of that loss — consistent with a transfer pattern.`,
           'This is a structural proxy, not a measured transfer. Voters are anonymous; this inference is based on aggregate area-level changes only.',
           'Alternative explanations include differential turnout, new voters entering, or three-way vote movements.',
+          'Note: even a high co-movement rate does not prove voter transfer — it shows aggregate co-movement consistent with transfer. Compare these results to survey-based voter transition studies before drawing conclusions.',
         ],
         method: {
           description: `Area co-movement analysis: for each ${areaLvl}, check if losing_party votes fell AND gaining_party votes rose between year1 and year2.`,
@@ -347,10 +378,10 @@ export function registerStrategicTools(server: McpServer): void {
     }
   );
 
-  // ── rank_target_areas ────────────────────────────────────────────────────
+  // ── rank_areas_by_party_presence ─────────────────────────────────────────
   server.tool(
-    'rank_target_areas',
-    'Scores and ranks municipalities by strategic campaign opportunity for a given party. Combines four transparent scoring components: (1) prior party support in the area, (2) vote share growth trend, (3) electorate size (raw vote potential), (4) gap to party national average (upside). All score components are returned individually for full auditability.',
+    'rank_areas_by_party_presence',
+    'Ranks municipalities by historical party presence — where the party already has strong support, growing trends, and large vote pools. Useful for GOTV mobilisation and consolidation targeting. NOTE: scores are derived solely from historical vote share data. This tool does not identify persuadable non-supporters, model demographic opportunity, or predict voter transferability. All score components are returned individually for sensitivity checking.',
     {
       party_id: z.string().describe('The party running the campaign (abbreviation or code).'),
       election_type: ELECTION_TYPE_PARAM,
@@ -379,7 +410,7 @@ export function registerStrategicTools(server: McpServer): void {
           const r = await loadPartyResults(trend_year, undefined, electionType);
           trendRows = r.rows;
         } catch (err) {
-          console.error(`[rank_target_areas] failed to load trend year ${trend_year}:`, err);
+          console.error(`[rank_areas_by_party_presence] failed to load trend year ${trend_year}:`, err);
           trendRows = null;
         }
       }
@@ -408,6 +439,18 @@ export function registerStrategicTools(server: McpServer): void {
 
       const maxVotes = Math.max(...partyKunta.map((r) => r.votes));
 
+      // Pre-pass: collect all trend changes to build the percentile distribution for c2.
+      // Using the observed distribution rather than a fixed ±10pp scale ensures that
+      // Finnish area-level swings (typically ±1–3pp) are spread across the full 0–1 range.
+      const allTrendChanges: number[] = [];
+      for (const r of partyKunta) {
+        const prevShare = trendMap.get(r.area_id);
+        if (prevShare !== undefined) {
+          allTrendChanges.push((r.vote_share ?? 0) - prevShare);
+        }
+      }
+      const sortedTrendChanges = [...allTrendChanges].sort((a, b) => a - b);
+
       const scored = partyKunta.map((r) => {
         const share = r.vote_share ?? 0;
         const totalVotes = allVotesByArea.get(r.area_id) ?? 0;
@@ -417,29 +460,29 @@ export function registerStrategicTools(server: McpServer): void {
         const c1_current_support = Math.min(1, share / (nationalShare * 2));
 
         // Component 2: growth trend (0–1; 0.5 if no trend data)
+        // Uses percentile rank within the actual distribution of trend changes for this
+        // party/election pair. Avoids the ±10pp fixed scale that compressed all Finnish
+        // area-level swings (typically ±1–3pp) into a near-constant range.
         let c2_trend = 0.5;
         const prevShare = trendMap.get(r.area_id);
         if (prevShare !== undefined) {
           const change = share - prevShare;
-          // Normalize: +10pp change → 1.0, -10pp → 0.0
-          c2_trend = Math.max(0, Math.min(1, 0.5 + change / 20));
+          const rank = sortedTrendChanges.filter((t) => t <= change).length;
+          c2_trend = sortedTrendChanges.length > 1
+            ? (rank - 1) / (sortedTrendChanges.length - 1)
+            : 0.5;
         }
 
-        // Component 3: electorate size (relative to largest party kunta) (0–1)
-        const c3_size = maxVotes > 0 ? r.votes / maxVotes : 0;
+        // Component 3: electorate size (total votes cast in area / largest area total) (0–1)
+        const maxTotalVotes = Math.max(...Array.from(allVotesByArea.values()), 1);
+        const c3_size = (allVotesByArea.get(r.area_id) ?? 0) / maxTotalVotes;
 
-        // Component 4: upside gap — how much below national average (0–1)
-        // Areas near national average score 0.5; below average score higher (more upside)
-        const gap = nationalShare - share;
-        const c4_upside = Math.max(0, Math.min(1, 0.5 + gap / (nationalShare * 2)));
-
-        // Composite score: weighted average
-        const weights = { c1: 0.35, c2: 0.20, c3: 0.25, c4: 0.20 };
+        // Composite score: weighted average of 3 independent components (c4 removed — was mathematically identical to 1 − c1)
+        const weights = { c1: 0.40, c2: 0.35, c3: 0.25 };
         const composite = round2(
           c1_current_support * weights.c1 +
           c2_trend * weights.c2 +
-          c3_size * weights.c3 +
-          c4_upside * weights.c4
+          c3_size * weights.c3
         );
 
         return {
@@ -450,7 +493,6 @@ export function registerStrategicTools(server: McpServer): void {
             c1_current_support: round2(c1_current_support),
             c2_trend: trendMap.has(r.area_id) ? round2(c2_trend) : null,
             c3_size: round2(c3_size),
-            c4_upside: round2(c4_upside),
           },
           data: {
             party_votes: r.votes,
@@ -474,15 +516,15 @@ export function registerStrategicTools(server: McpServer): void {
         [`n_${areaLvl}s_scored`]: scored.length,
         top_target_areas: ranked,
         scoring_methodology: {
-          description: 'Composite score = weighted average of 4 components (all 0–1).',
-          weights: { c1_current_support: 0.35, c2_trend: 0.20, c3_size: 0.25, c4_upside: 0.20 },
+          description: 'Composite score = weighted average of 3 independent components (all 0–1).',
+          weights: { c1_current_support: 0.40, c2_trend: 0.35, c3_size: 0.25 },
           components: {
             c1_current_support: 'Current party vote share relative to national average. Above-national = higher score.',
-            c2_trend: 'Vote share change from trend_year to reference_year, normalized to [0,1]. Positive trend = higher score. 0.5 if no trend year provided.',
-            c3_size: `Raw party votes relative to the party's best ${areaLvl}. Larger vote pools score higher.`,
-            c4_upside: 'Gap below national average. Areas underperforming relative to national average have more headroom for gains.',
+            c2_trend: 'Percentile rank of vote share change (trend_year → reference_year) within the actual distribution of changes across all scored areas. An area with the largest gain scores 1.0; the largest loss scores 0.0. 0.5 if no trend year provided. Percentile rank avoids the fixed ±10pp scale which would compress typical Finnish area-level swings (±1–3pp) into a near-constant range.',
+            c3_size: `Total votes cast in area relative to the largest area. Measures electorate size, not party vote volume.`,
           },
           note: 'Scores are relative to this party\'s own distribution. Use compare_parties and find_area_overperformance for cross-party context.',
+          methodology_warning: 'This tool ranks areas by where the party already has support — it is a consolidation and GOTV tool, not a persuasion-opportunity tool. The weights (0.40/0.35/0.25) are heuristic and not empirically calibrated; rankings may change materially with different weight choices. For persuasion targeting, cross-reference with estimate_vote_transfer_proxy and get_turnout.',
         },
         method: {
           source_table: tableId,

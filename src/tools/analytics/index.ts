@@ -4,6 +4,17 @@ import { loadPartyResults, loadCandidateResults } from '../../data/loaders.js';
 import type { ElectionRecord, ElectionType, AreaLevel } from '../../data/types.js';
 import { ELECTION_TYPE_PARAM, subnatLevel, matchesParty, pct, round2, mcpText, errResult } from '../shared.js';
 
+// ─── Shared caveats ───────────────────────────────────────────────────────────
+
+/**
+ * POL-12: rank_within_party is intra-party only and does not indicate seat outcome.
+ * Added to every output that exposes rank_within_party.
+ */
+const RANK_WITHIN_PARTY_CAVEAT =
+  "Intra-party ranking only. Does not indicate election outcome or seat allocation — " +
+  "seat distribution depends on party total votes and d'Hondt divisor calculation, " +
+  "which this service does not model.";
+
 // ─── Analytics helpers ────────────────────────────────────────────────────────
 
 /**
@@ -12,22 +23,22 @@ import { ELECTION_TYPE_PARAM, subnatLevel, matchesParty, pct, round2, mcpText, e
  * More interpretable than HHI for election analysis.
  */
 function concentrationMetrics(areaVotes: number[]): {
-  top1_share: number;
-  top3_share: number;
-  top5_share: number;
-  top10_share: number;
+  top1_share_pct: number;
+  top3_share_pct: number;
+  top5_share_pct: number;
+  top10_share_pct: number;
   n_areas: number;
 } {
   const sorted = [...areaVotes].sort((a, b) => b - a);
   const total = sorted.reduce((s, v) => s + v, 0);
-  if (total === 0) return { top1_share: 0, top3_share: 0, top5_share: 0, top10_share: 0, n_areas: 0 };
+  if (total === 0) return { top1_share_pct: 0, top3_share_pct: 0, top5_share_pct: 0, top10_share_pct: 0, n_areas: 0 };
   const topShare = (n: number) =>
-    Math.round((sorted.slice(0, n).reduce((s, v) => s + v, 0) / total) * 1000) / 1000;
+    pct((sorted.slice(0, n).reduce((s, v) => s + v, 0) / total) * 100);
   return {
-    top1_share: topShare(1),
-    top3_share: topShare(3),
-    top5_share: topShare(5),
-    top10_share: topShare(10),
+    top1_share_pct: topShare(1),
+    top3_share_pct: topShare(3),
+    top5_share_pct: topShare(5),
+    top10_share_pct: topShare(10),
     n_areas: sorted.length,
   };
 }
@@ -79,6 +90,7 @@ export function registerAnalyticsTools(server: McpServer): void {
         : 'vaalipiiri';
       const vpRow = candidateRows.find((r) => r.area_level === unitAreaLevel)
         ?? candidateRows.find((r) => r.area_level === 'vaalipiiri');
+      const usingFallbackSum = !vpRow;
       const totalVotes = vpRow?.votes ?? candidateRows.filter((r) => r.area_level === 'aanestysalue').reduce((s, r) => s + r.votes, 0);
       const candidateName = candidateRows[0]!.candidate_name ?? candidate_id;
       const partyId = candidateRows[0]!.party_id ?? '';
@@ -93,7 +105,7 @@ export function registerAnalyticsTools(server: McpServer): void {
       const partyVpRows = allVpRows.filter((r) => r.party_id === partyId).sort((a, b) => b.votes - a.votes);
       const rankWithinParty = partyVpRows.findIndex((r) => r.candidate_id === candidate_id) + 1;
       const partyTotalVotes = partyVpRows.reduce((s, r) => s + r.votes, 0);
-      const shareOfPartyVote = partyTotalVotes > 0 ? round2(totalVotes / partyTotalVotes) : null;
+      const shareOfPartyVotePct = partyTotalVotes > 0 ? pct(totalVotes / partyTotalVotes * 100) : null;
 
       // äänestysalue rows for geographic analysis
       const aalueRows = candidateRows.filter((r) => r.area_level === 'aanestysalue');
@@ -123,8 +135,10 @@ export function registerAnalyticsTools(server: McpServer): void {
         vote_share_pct: vpRow?.vote_share ? pct(vpRow.vote_share) : null,
         rank_overall_in_unit: overallRank || null,
         rank_within_party: rankWithinParty || null,
+        rank_within_party_caveat: RANK_WITHIN_PARTY_CAVEAT,
         total_party_candidates: partyVpRows.length,
-        share_of_party_vote: shareOfPartyVote,
+        share_of_party_vote_pct: shareOfPartyVotePct,
+        ...(usingFallbackSum ? { data_warning: 'total_votes reconstructed by summing äänestysalue rows — unit-level aggregate row not found. May be incomplete if not all rows were loaded.' } : {}),
         strongest_areas: strongest,
         weakest_areas: weakest,
         geographic_concentration: concentration,
@@ -643,9 +657,9 @@ export function registerAnalyticsTools(server: McpServer): void {
           concentration: conc,
           [`top_10_${areaLvl}s`]: top10,
           interpretation: {
-            top1_share: `${pct(conc.top1_share * 100)}% of votes come from the single strongest ${areaLvl}`,
-            top3_share: `${pct(conc.top3_share * 100)}% of votes come from the top 3 ${areaLvl}s`,
-            top10_share: `${pct(conc.top10_share * 100)}% of votes come from the top 10 ${areaLvl}s`,
+            top1_share: `${conc.top1_share_pct}% of votes come from the single strongest ${areaLvl}`,
+            top3_share: `${conc.top3_share_pct}% of votes come from the top 3 ${areaLvl}s`,
+            top10_share: `${conc.top10_share_pct}% of votes come from the top 10 ${areaLvl}s`,
           },
           method: { description: `Top-N share concentration using ${areaLvl}-level rows.`, source_table: tableId },
         });
@@ -673,9 +687,9 @@ export function registerAnalyticsTools(server: McpServer): void {
           concentration: conc,
           top_10_aanestysalueet: top10,
           interpretation: {
-            top1_share: `${pct(conc.top1_share * 100)}% of votes come from the single strongest äänestysalue`,
-            top3_share: `${pct(conc.top3_share * 100)}% of votes come from the top 3 äänestysalueet`,
-            top10_share: `${pct(conc.top10_share * 100)}% of votes come from the top 10 äänestysalueet`,
+            top1_share: `${conc.top1_share_pct}% of votes come from the single strongest äänestysalue`,
+            top3_share: `${conc.top3_share_pct}% of votes come from the top 3 äänestysalueet`,
+            top10_share: `${conc.top10_share_pct}% of votes come from the top 10 äänestysalueet`,
           },
           method: { description: 'Top-N share concentration using äänestysalue-level rows to avoid double-counting.', source_table: tableId },
         });
@@ -739,6 +753,7 @@ export function registerAnalyticsTools(server: McpServer): void {
         unit_key: unit_key ?? 'national',
         votes: targetRow.votes,
         rank_within_party: rankWithinParty,
+        rank_within_party_caveat: RANK_WITHIN_PARTY_CAVEAT,
         total_party_candidates: partyRows.length,
         share_of_party_vote_pct: partyTotalVotes > 0 ? pct(targetRow.votes / partyTotalVotes * 100) : null,
         party_total_votes: partyTotalVotes,

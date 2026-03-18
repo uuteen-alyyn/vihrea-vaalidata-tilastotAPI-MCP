@@ -162,6 +162,13 @@ describe('matchesParty', () => {
     expect(matchesParty(makeRow('SDP', 'Suomen Sosialidemokraattinen Puolue'), 'SDP')).toBe(true);
   });
 
+  // STAT-1: lowercase query must match uppercase stored party_id
+  it('matches lowercase query against uppercase party_id (STAT-1)', () => {
+    expect(matchesParty(makeRow('KOK', 'Kansallinen Kokoomus'), 'kok')).toBe(true);
+    expect(matchesParty(makeRow('SDP', 'Suomen Sosialidemokraattinen Puolue'), 'sdp')).toBe(true);
+    expect(matchesParty(makeRow('VIHR', 'Vihreä liitto'), 'vihr')).toBe(true);
+  });
+
   it('matches by lowercase party_name', () => {
     expect(matchesParty(makeRow('SDP', 'Suomen Sosialidemokraattinen Puolue'), 'suomen sosialidemokraattinen puolue')).toBe(true);
   });

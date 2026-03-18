@@ -29,7 +29,7 @@ export function subnatLevel(type: ElectionType): AreaLevel {
  */
 export function matchesParty(row: ElectionRecord, query: string): boolean {
   const q = query.toLowerCase().trim();
-  return row.party_id === query || row.party_name?.toLowerCase() === q;
+  return row.party_id?.toLowerCase() === q || row.party_name?.toLowerCase() === q;
 }
 
 // ─── Math helpers ─────────────────────────────────────────────────────────────

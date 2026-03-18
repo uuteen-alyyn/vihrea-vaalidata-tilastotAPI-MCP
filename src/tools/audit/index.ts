@@ -52,13 +52,13 @@ const METRIC_REGISTRY: Record<string, {
   },
   share_of_party_vote: {
     name: 'Share of Party Vote',
-    used_in: ['analyze_candidate_profile', 'analyze_within_party_position'],
-    definition: 'A candidate\'s votes as a fraction of their party\'s total votes in the vaalipiiri. Measures how dominant the candidate is within their own party\'s support.',
-    formula: 'share_of_party_vote = candidate_votes_in_vaalipiiri / sum(all_party_candidates_votes_in_vaalipiiri)',
-    unit: 'ratio (0–1)',
+    used_in: ['analyze_candidate_profile (field: share_of_party_vote_pct)', 'analyze_within_party_position (field: share_of_party_vote_pct)'],
+    definition: 'A candidate\'s votes as a percentage of their party\'s total votes in the vaalipiiri. Measures how dominant the candidate is within their own party\'s support.',
+    formula: 'share_of_party_vote_pct = (candidate_votes_in_vaalipiiri / sum(all_party_candidates_votes_in_vaalipiiri)) × 100',
+    unit: 'percentage (0–100)',
     notes: [
       'Vaalipiiri-level values only (VP## row).',
-      'A value of 0.5 means the candidate accounts for half of their party\'s total vote in the district.',
+      'A value of 50 means the candidate accounts for half of their party\'s total vote in the district.',
     ],
   },
   overperformance_pp: {
@@ -98,18 +98,17 @@ const METRIC_REGISTRY: Record<string, {
     ],
   },
   composite_score: {
-    name: 'Area Opportunity Composite Score',
-    used_in: ['rank_target_areas'],
-    definition: 'A weighted composite of four components scoring the strategic opportunity of a municipality for a given party\'s campaign. All components are normalized to [0, 1].',
-    formula: 'composite = 0.35×c1_current_support + 0.20×c2_trend + 0.25×c3_size + 0.20×c4_upside',
+    name: 'Party Presence Composite Score',
+    used_in: ['rank_areas_by_party_presence'],
+    definition: 'A weighted composite of three independent components scoring a municipality by historical party presence. All components are normalized to [0, 1]. Ranks areas by where the party already has support — not by persuasion opportunity.',
+    formula: 'composite = 0.40×c1_current_support + 0.35×c2_trend + 0.25×c3_size',
     unit: 'dimensionless score (0–1)',
     notes: [
       'c1_current_support: current vote share relative to national average (above-average = higher score).',
       'c2_trend: vote share change since trend_year, normalized. 0.5 if no trend year provided.',
-      'c3_size: raw party votes relative to the party\'s best kunta (larger absolute pools score higher).',
-      'c4_upside: gap below national average (underperforming areas have more room to grow).',
-      'Weights are fixed. Scores are relative to this party\'s own distribution, not cross-party.',
-      'Full component breakdown is returned in every rank_target_areas output.',
+      'c3_size: total votes cast in area relative to the largest area (electorate size, not party vote volume).',
+      'Weights are heuristic and not empirically calibrated. Scores are relative to this party\'s own distribution, not cross-party.',
+      'Full component breakdown is returned in every rank_areas_by_party_presence output.',
     ],
   },
   vote_transfer_proxy: {
@@ -144,7 +143,7 @@ const TABLE_DESCRIPTIONS: Record<string, {
     coverage: 'All parliamentary elections 1983–2023. All municipalities. National, vaalipiiri, and kunta levels.',
     variables: ['Vuosi (year)', 'Sukupuoli (gender — use SSS for total)', 'Puolue (party)', 'Vaalipiiri ja kunta vaalivuonna (area)', 'Tiedot (measures: evaa_aanet votes, evaa_osuus_aanista vote share, etc.)'],
     area_code_format: 'SSS = national total, {vp:02}{kunta:03} e.g. 010091 = Helsinki (VP01 + KU091), {vp:02}0000 = vaalipiiri total',
-    used_by: ['get_party_results', 'get_area_results', 'get_election_results', 'get_rankings', 'analyze_party_profile', 'compare_parties', 'compare_elections', 'find_area_overperformance', 'find_area_underperformance', 'analyze_geographic_concentration', 'analyze_vote_distribution', 'find_exposed_vote_pools', 'estimate_vote_transfer_proxy', 'rank_target_areas', 'get_area_profile', 'compare_areas', 'analyze_area_volatility', 'find_strongholds', 'find_weak_zones'],
+    used_by: ['get_party_results', 'get_area_results', 'get_election_results', 'get_rankings', 'analyze_party_profile', 'compare_parties', 'compare_elections', 'find_area_overperformance', 'find_area_underperformance', 'analyze_geographic_concentration', 'analyze_vote_distribution', 'find_exposed_vote_pools', 'estimate_vote_transfer_proxy', 'rank_areas_by_party_presence', 'get_area_profile', 'compare_areas', 'analyze_area_volatility', 'find_strongholds', 'find_weak_zones'],
   },
   statfin_evaa_pxt_13sx: {
     table_id: 'statfin_evaa_pxt_13sx',
@@ -222,19 +221,34 @@ const CAVEATS: Record<string, {
     description: 'The 13sw Puolue variable includes a total row with party_id "SSS" (Puolueiden äänet yhteensä, 100% vote share). All area-centric and party-ranking tools in this MCP filter this row out. Raw data mode (output_mode=data) includes it.',
     workaround: 'Filter rows where party_id === "SSS" when processing raw data output.',
   },
-  bug_share_of_party_vote_ratio: {
-    id: 'bug_share_of_party_vote_ratio',
-    severity: 'moderate',
-    affects: ['analyze_candidate_profile'],
-    description: 'KNOWN BUG (BUG-1): The share_of_party_vote field in analyze_candidate_profile is returned as a ratio (0–1) rather than a percentage. The value 0.19 means 19%, not 0.19%. The analyze_within_party_position tool correctly returns share_of_party_vote_pct as a percentage. Use analyze_within_party_position for the percentage form.',
-    workaround: 'Multiply share_of_party_vote from analyze_candidate_profile by 100 to get a percentage. Or use analyze_within_party_position which returns share_of_party_vote_pct correctly.',
+  // ── Open analytical framing issues (POL-series) ──────────────────────────
+  rank_within_party_no_seat_data: {
+    id: 'rank_within_party_no_seat_data',
+    severity: 'critical',
+    affects: ['analyze_candidate_profile', 'analyze_within_party_position'],
+    description: 'rank_within_party is an intra-party ordering by votes only. A candidate ranked #1 in their party may or may not have won a seat — seat allocation depends on the party\'s total vote count and the d\'Hondt divisor calculation across all competing parties. This MCP does not model seat allocation and contains no seat outcome data.',
+    workaround: 'Do not infer seat outcomes from rank_within_party alone. Seat data must be obtained from an external source (e.g. eduskunta.fi). Every output containing rank_within_party includes a rank_within_party_caveat field stating this explicitly.',
   },
-  bug_analysis_mode_double_count: {
-    id: 'bug_analysis_mode_double_count',
+  c2_trend_percentile_scale: {
+    id: 'c2_trend_percentile_scale',
     severity: 'moderate',
-    affects: ['get_party_results (analysis mode)', 'get_area_results (analysis mode)', 'get_election_results (analysis mode)'],
-    description: 'KNOWN BUG (BUG-2): When output_mode is "analysis", the total_votes figure in the summary block double-counts votes — it sums both the kunta-level rows and the vaalipiiri/national aggregate rows. The data mode (output_mode=data) returns correct individual row values. The analysis mode summary total is approximately 2× the correct value.',
-    workaround: 'Use output_mode=data and sum votes yourself, or use get_rankings / get_election_results in data mode for accurate totals.',
+    affects: ['rank_areas_by_party_presence'],
+    description: 'The c2_trend component of the composite area score is a percentile rank of vote share change across the actual distribution of changes for the selected party/election pair. All scores are relative — an area scoring c2=0.8 has a larger vote share increase than 80% of scored areas, but the absolute change may be small. c2 does not generalize across different party/election combinations.',
+    workaround: 'Inspect trend_change_pp in each area\'s data block for absolute magnitude. Compare across parties with care — percentile rank is relative to each party\'s own distribution.',
+  },
+  pedersen_period_length: {
+    id: 'pedersen_period_length',
+    severity: 'moderate',
+    affects: ['get_area_profile', 'analyze_area_volatility'],
+    description: 'The Pedersen volatility index is computed between two consecutive elections but is not normalized for the length of the inter-election period. A 4-year gap and an 8-year gap produce incomparable Pedersen values for the same underlying rate of change. Finnish parliamentary elections are typically 4 years apart but snap elections and EU election gaps vary.',
+    workaround: 'Use years_between in the output to assess comparability. For cross-election-type comparisons, treat Pedersen values as indicative only. Divide by years_between to approximate per-year volatility rate (not provided directly).',
+  },
+  compare_across_elections_eu_second_order: {
+    id: 'compare_across_elections_eu_second_order',
+    severity: 'moderate',
+    affects: ['compare_across_elections'],
+    description: 'EU Parliament elections are second-order elections (Reif & Schmitt 1980): turnout is typically 40% vs 70–75% in Finnish parliamentary elections. The EU electorate is self-selected and not representative of the parliamentary-election electorate. Vote shares and trends from EU elections are structurally incomparable to national elections. Municipal elections further differ by allowing all residents 18+ (including non-citizens) to vote, unlike parliamentary elections which require Finnish citizenship.',
+    workaround: 'Always include the election_type field when reporting cross-election comparisons. Cross-type comparability_notes are provided in compare_across_elections output. Treat EU-to-parliamentary trend as directional indicator only, not a direct vote-share comparison.',
   },
 };
 
@@ -247,7 +261,7 @@ export function registerAuditTools(server: McpServer): void {
     'explain_metric',
     'Returns the definition, formula, unit, and methodology notes for any metric used in this MCP\'s analytics outputs. Use this to understand what a number means before presenting it to a user.',
     {
-      metric: z.string().describe('Metric name to look up. Known metrics: pedersen_index, vote_share, rank_within_party, share_of_party_vote, overperformance_pp, underperformance_pp, top_n_share, composite_score, vote_transfer_proxy. Partial name matching is supported.'),
+      metric: z.string().describe('Metric name to look up. Known metrics: pedersen_index, vote_share, rank_within_party, share_of_party_vote_pct, overperformance_pp, underperformance_pp, top_n_share, composite_score, vote_transfer_proxy. Partial name matching is supported.'),
     },
     async ({ metric }) => {
       const key = metric.toLowerCase().replace(/[^a-z0-9_]/g, '_');
@@ -324,7 +338,7 @@ export function registerAuditTools(server: McpServer): void {
           source_tables: ['statfin_evaa_pxt_13t6–13ti (one per specified vaalipiiri)'],
           query_filters: ['All rows for the vaalipiiri loaded; filtered to candidate_id after fetch'],
           normalization: ['normalizeCandidateByAanestysalue()'],
-          transformations: ['Rank computed from sorted vaalipiiri-level (VP##) rows', 'rank_within_party: sorted party candidates at VP level', 'share_of_party_vote: candidate_votes / sum(all party candidate votes at VP level)', 'Geographic analysis uses äänestysalue rows only (no double-counting)'],
+          transformations: ['Rank computed from sorted vaalipiiri-level (VP##) rows', 'rank_within_party: sorted party candidates at VP level', 'share_of_party_vote_pct: (candidate_votes / sum(all party candidate votes at VP level)) × 100', 'Geographic analysis uses äänestysalue rows only (no double-counting)'],
           caveats: ['candidate_data_2023_only'],
         },
         compare_elections: {
@@ -355,7 +369,7 @@ export function registerAuditTools(server: McpServer): void {
           transformations: ['Pedersen index computed per consecutive year pair', 'biggest_gainer / biggest_loser = max/min absolute change'],
           caveats: ['municipality_boundary_changes', 'sss_party_total_row'],
         },
-        rank_target_areas: {
+        rank_areas_by_party_presence: {
           source_tables: ['statfin_evaa_pxt_13sw (queried once per reference_year, once per trend_year if provided)'],
           query_filters: ['All parties and areas loaded; filtered to subject party after fetch'],
           normalization: ['normalizePartyByKunta()'],
@@ -457,7 +471,7 @@ export function registerAuditTools(server: McpServer): void {
             'Candidate vote share cannot be summed to get party vote share because candidates from the same party do not add up exactly (rounding, empty votes, etc.).',
           ],
           recommendations: [
-            'Use share_of_party_vote (from analyze_candidate_profile) to understand a candidate\'s contribution to their party\'s total.',
+            'Use share_of_party_vote_pct (from analyze_candidate_profile) to understand a candidate\'s contribution to their party\'s total.',
             'Do not compare candidate vote shares to party vote shares without this context.',
           ],
         },
