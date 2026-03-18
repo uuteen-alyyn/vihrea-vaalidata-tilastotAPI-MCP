@@ -492,3 +492,19 @@ Before 2012 reform: kymi, etela-savo, pohjois-savo, pohjois-karjala were separat
 These merged into kaakkois-suomi and savo-karjala in 2015. Old keys must be used for 2007/2011 queries.
 
 **Build + test:** 99/99 passing (no normalizer changes needed)
+
+---
+
+## PHASE 14 COMPLETE: MUNICIPAL 2021 CANDIDATE DATA GAP RESOLVED — 2026-03-18 10:07:00
+
+Investigated and resolved the municipal 2021 candidate data gap.
+
+**Finding:** 12 per-vaalipiiri candidate tables with äänestysalue-level breakdown exist in StatFin_Passiivi/kvaa/ for municipal 2021. Table IDs: `statfinpas_kvaa_pxt_12vs_2021` (helsinki) through `statfinpas_kvaa_pxt_12wu_2021` (lappi).
+
+**Format verified:** Content-column format with `Tiedot` variable (`aanet_yht`=votes, `osuus_aanista`=share), `Äänestysalue` area variable — identical to 2025 municipal tables. No normalizer changes needed.
+
+**Changes:**
+- `src/data/election-tables.ts`: Updated municipal 2021 entry from stub (no tables) to full registration with 12 vaalipiiri, database: archive
+- Removed stale `AreaLevel` import (unused after earlier refactoring)
+
+**Build + test:** 99/99 passing

@@ -1,4 +1,4 @@
-import type { ElectionType, AreaLevel } from './types.js';
+import type { ElectionType } from './types.js';
 
 /**
  * Registry of known Tilastokeskus table IDs for each election type.
@@ -311,9 +311,26 @@ export const MUNICIPAL_TABLES: ElectionTableSet[] = [
   {
     election_type: 'municipal',
     year: 2021,
-    database: DATABASE.active,
+    database: DATABASE.archive,
     // party_by_kunta: covered by 14z7 (1976–2025) via 2025 entry fallback
-    // No per-äänestysalue candidate tables available in archive for 2021
+    geographic_unit_type: 'vaalipiiri',
+    candidate_by_aanestysalue: {
+      // Content-column format with Tiedot variable: aanet_yht=votes, osuus_aanista=share.
+      // Area variable is 'Äänestysalue'; kunta aggregate uses 3-digit codes (e.g. '091' for Helsinki).
+      // No Ahvenanmaa (municipal elections exclude Åland).
+      'helsinki':       'statfinpas_kvaa_pxt_12vs_2021',
+      'uusimaa':        'statfinpas_kvaa_pxt_12wj_2021',
+      'lounais-suomi':  'statfinpas_kvaa_pxt_12wk_2021',   // Varsinais-Suomen vaalipiiri
+      'satakunta':      'statfinpas_kvaa_pxt_12wl_2021',
+      'hame':           'statfinpas_kvaa_pxt_12wm_2021',
+      'pirkanmaa':      'statfinpas_kvaa_pxt_12wn_2021',
+      'kaakkois-suomi': 'statfinpas_kvaa_pxt_12wp_2021',
+      'savo-karjala':   'statfinpas_kvaa_pxt_12wq_2021',
+      'vaasa':          'statfinpas_kvaa_pxt_12wr_2021',
+      'keski-suomi':    'statfinpas_kvaa_pxt_12ws_2021',
+      'oulu':           'statfinpas_kvaa_pxt_12wt_2021',
+      'lappi':          'statfinpas_kvaa_pxt_12wu_2021',
+    },
   },
 ];
 

@@ -574,17 +574,20 @@ Callers must use old keys (e.g. `kymi`, `etela-savo`) when querying 2007/2011 el
 
 ---
 
-## Phase 14: Municipal 2021 Candidate Data Gap
+## Phase 14: Municipal 2021 Candidate Data Gap ✅ COMPLETE
 
 **Goal:** Determine whether per-äänestysalue candidate tables exist for municipal 2021 in StatFin_Passiivi, and register them if they do.
 
-**Context:** Municipal 2021 currently has party data only (via multi-year 14z7 table). Candidate-level queries for 2021 are unsupported. The 2025 tables (14v9–14vk) are registered and working.
+### Finding
+Tables FOUND in StatFin_Passiivi. 12 per-vaalipiiri candidate tables exist (`statfinpas_kvaa_pxt_12vs_2021` through `statfinpas_kvaa_pxt_12wu_2021`). Format is content-column (`Tiedot` with `aanet_yht`=votes, `osuus_aanista`=share, `Äänestysalue` area variable) — same as 2025 municipal tables, no normalizer changes needed.
 
 ### Tasks
-- [ ] Search StatFin_Passiivi (`/fi/StatFin_Passiivi/kvaa/`) for 2021 candidate tables
-- [ ] If found: fetch metadata, verify variable format, register tables
-- [ ] If not found: add explicit caveat to `get_data_caveats` and `describe_election` for municipal 2021
-- [ ] Logbook entry with finding
+- [x] Search StatFin_Passiivi (`/fi/StatFin_Passiivi/kvaa/`) for 2021 candidate tables — found 12 vaalipiiri tables
+- [x] Fetch metadata for Helsinki table, verify variable format matches 2025 format
+- [x] Register 12 tables in `election-tables.ts` (MUNICIPAL_TABLES, database: archive)
+- [x] Remove unused `AreaLevel` import from election-tables.ts
+- [x] Build + tests: 99/99 passing
+- [x] Logbook entry
 
 ---
 
