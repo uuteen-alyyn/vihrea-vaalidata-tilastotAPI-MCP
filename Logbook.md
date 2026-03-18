@@ -757,3 +757,58 @@ Audited all `concentrationMetrics()` callers: `analyze_candidate_profile` (line 
 - Removed resolved STAT-2 and POL-10 from BACKLOG; updated COST-3 and QUAL-6 descriptions
 
 **Build:** clean. **Tests:** 101/101 passed.
+
+## PHASES 27–30: VOTER DEMOGRAPHICS LAYER — 2026-03-18 14:27:00
+
+Implemented the full voter demographics feature as planned in `Implementation_plan_voter_demographics.md`. Two new MCP tools covering socioeconomic composition and turnout participation across four election types.
+
+### Phase 27 — API exploration & table registry
+
+Pre-phase metadata exploration confirmed all variable codes before writing any code. Key findings documented in plan:
+- 13su and 14w4 are multi-year tables (parliamentary 2011–2023, municipal 2012–2025); year filtering via `Vuosi` variable using same pattern as existing `loadPartyResults`
+- 14w4 uses `Ehdokkaan sukupuoli` (not `Sukupuoli`) and eligible voter code `0001` (not `00S1`)
+- All background dimensions are categories in a single `Taustamuuttujat` variable — one API call serves any dimension
+- `income_decile` only has bottom (des1) and top (des10) decile — not all 10
+- All turnout tables have a full geographic `Alue` dimension; must filter to `Alue=SSS` for national totals
+- 13ys age table has 18/19 as individual codes then 5-year bins — not purely individual ages
+- All turnout tables contain all three genders (SSS/1/2) in one response — gender gap computable from single call
+- Presidential turnout tables have `Kierros` (round) variable: 1=first round, 2=runoff
+
+Registered 2 background tables (13su, 14w4) and 20 turnout tables (5 per election type × 4 types) in `election-tables.ts`. Added `voter_background` and `voter_turnout_by_demographics` fields to `ElectionTableSet` interface and `findVoterBackgroundTableForType()` helper.
+
+### Phase 28 — Loaders & normalizers
+
+New file `src/data/demographics-normalizer.ts`:
+- `normalizeVoterBackground`: handles per-election-type gender variable name and eligible voter code differences; strips aggregate Taustamuuttujat codes (SSS, ptoSSS, kouSSS, sekSSS); maps `lkm1`→count and `pros`→share_pct
+- `normalizeVoterTurnoutByDemographics`: detects dimension variable from response columns; for `age_group`, aggregates {018, 019, 20-24} → 18-24 etc. using count measures (never averages percentages); strips SSS/09/9/X codes; presidential `Kierros` filtering
+
+New loaders in `loaders.ts`:
+- `loadVoterBackground`: validates election type + year before any API call; server-side Vuosi, gender (all 3), group, dimension, and Tiedot filtering
+- `loadVoterTurnoutByDemographics`: validates election type + year; always filters `Alue=SSS`; adds `Kierros` filter for presidential; descriptive error messages include valid options
+
+16 new unit tests (6 test files total).
+
+### Phase 29 — Tool handlers
+
+New file `src/tools/demographics/index.ts` with `registerDemographicsTools()`:
+- `get_voter_background`: Zod schema with explicit income_decile caveat in description; analysis mode sorted by share_pct desc; dimension-specific notes (income_decile 2-row limitation, origin single-value); group population caveat
+- `get_voter_turnout_by_demographics`: analysis mode sorted by turnout_pct desc; highest/lowest callout with gap pp; gender gap note computed from same API response (no extra calls); presidential round note; mandatory coverage caveat always present
+
+Registered in `server.ts` alongside other tool categories.
+
+15 new tests (132/132 total).
+
+### Phase 30 — Live validation & system prompt
+
+All four live tests passed:
+
+| Test | Result |
+|---|---|
+| Parliamentary 2023 income_quintile | Q1=58.4%, Q5=85.1% ✅ matches published ~58%/~85% |
+| Elected education 2011→2023 | Master/research degree: 50%→58% (+8 pp) ✅ upward trend confirmed |
+| EU 2024 origin_language | Finnish-speakers 40.1%, foreign-language speakers 17.3% ✅ large gap confirmed |
+| Municipal 2025 candidates employment | Employed 74.8%, retired 14.3% ✅ sensible distribution |
+
+Added voter demographics coverage text to MCP system prompt in `server.ts`.
+
+**Build:** clean. **Tests:** 132/132 passed.

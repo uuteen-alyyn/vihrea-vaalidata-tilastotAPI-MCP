@@ -70,7 +70,30 @@ Do **not reconstruct metrics manually** when MCP tools provide them. Treat MCP o
 \`get_top_n\` (election_type: eu, year: 2024, n: 10)
 
 **Presidential — round comparison:**
-\`get_candidate_results\` (election_type: presidential, year: 2024, round: 1) then \`get_candidate_results\` (..., round: 2) → compare Stubb results`;
+\`get_candidate_results\` (election_type: presidential, year: 2024, round: 1) then \`get_candidate_results\` (..., round: 2) → compare Stubb results
+
+## Voter demographics tools — coverage
+
+### get_voter_background
+Socioeconomic profile (employment, education, employer sector, income decile,
+language, origin) of eligible voters, candidates, and elected officials.
+- Parliamentary: 2011, 2015, 2019, 2023
+- Municipal: 2012, 2017, 2021, 2025
+- NOT available for EU parliament, presidential, or regional elections.
+- Use group=eligible_voters for the electorate, group=candidates for who ran,
+  group=elected for who won. These are three different populations.
+- income_decile: only lowest decile (bottom 10%) and highest decile (top 10%)
+  are published — intermediate deciles do not exist in this table.
+
+### get_voter_turnout_by_demographics
+Actual participation rate broken down by a demographic dimension.
+- Parliamentary: 2023 ONLY
+- Municipal: 2025 ONLY
+- EU parliament: 2024 ONLY
+- Presidential: 2024 ONLY (use round=1 for first round, round=2 for runoff)
+- NOT available for regional elections.
+- NOT available for any earlier years — this has been verified by full
+  archive enumeration. Do not attempt to retrieve 2019 or 2015 data.`;
 
 export function registerAllTools(server: McpServer): void {
   registerDiscoveryTools(server);
