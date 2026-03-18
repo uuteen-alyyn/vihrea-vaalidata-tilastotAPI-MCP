@@ -940,3 +940,51 @@ presidential:  [2018, 2024]
 **Files changed:** `src/data/election-tables.ts`, `src/data/normalizer.ts`, `src/data/loaders.ts`, `src/tools/area/index.ts`.
 
 **Build:** clean. **Tests:** 138/138 passed (no regressions).
+
+---
+
+## PHASE B1/B2: CANDIDATE RESOLVER ROUTING — 2026-03-19 00:11:00
+
+Extended `resolve_candidate` and `resolve_entities` in `src/tools/entity-resolution/index.ts` to support all election types.
+
+**Problem:** Candidate resolver was hardcoded to parliamentary logic (fan out to per-vaalipiiri tables). EU parliament and presidential elections have no per-unit tables — they have a single national candidate table. Calling `resolve_candidate` with `election_type: 'eu_parliament'` would look for non-existent per-vaalipiiri EU tables.
+
+**Solution:** Three-function architecture:
+
+1. `getCandidateListForUnit(year, unitKey, electionType)` — per-unit table (parliamentary, municipal, regional). Uses `loadCandidateData` with the unit-specific table.
+2. `getCandidatesFromNationalTable(year, electionType)` — national table (EU parliament, presidential). Queries the `candidate_by_vaalipiiri` table registered in the election table set (e.g. `14gx` for EU 2024, `14db` for presidential multi-year). For presidential, filters by year from the multi-year table.
+3. `getCandidatesAllUnits(year, electionType)` — dispatcher: routes EU/presidential to national, others to per-unit fan-out over all vaalipiiri/kunta keys.
+
+**Schema changes:**
+- `resolve_candidate` tool: `{ query, year, vaalipiiri?, party? }` → `{ query, election_type, year, unit_key?, party? }`
+- `resolve_entities` tool: added `election_type` param; `vaalipiiri` → `unit_key`
+- Output fields: `vaalipiiri` / `vaalipiiri_key` → `unit` / `unit_key` (undefined for national elections like EU/presidential)
+
+**Files changed:** `src/tools/entity-resolution/index.ts`.
+
+**Build:** clean. **Tests:** 159/159 passed (no regressions).
+
+---
+
+## PHASE D2: AREA HIERARCHY — parseKuntaCode + KUNTA_TO_VAALIPIIRI — 2026-03-19 00:11:00
+
+Created `src/data/area-hierarchy.ts` with cross-election geographic join utilities.
+
+**Purpose:** Enables joining data across elections at vaalipiiri level. An äänestysalue code (`PPKKKXXXL`) encodes both vaalipiiri prefix (positions 0–1) and kunta code (positions 2–4). A kunta code maps to exactly one vaalipiiri.
+
+**Exports:**
+- `VAALIPIIRI_PREFIX_MAP` — maps 2-digit prefix ('01'–'13') to vaalipiiri key ('helsinki'–'ahvenanmaa'). 13 entries. Stable since 2012 vaalipiiri reform.
+- `parseKuntaCode(code, electionType)` — extracts 3-digit kunta code from äänestysalue code for parliamentary/municipal/presidential. Returns null for EU (format unverified) and regional (different hierarchy). Returns null for non-numeric codes (e.g. SSS).
+- `getVaalipiiriFromAanestysalueCode(code)` — extracts vaalipiiri key directly from äänestysalue prefix.
+- `getKuntaToVaalipiiri(loader)` — builds kunta→vaalipiiri lookup lazily from 13sw metadata on first use. Coalesces concurrent first-use calls into a single fetch (promise coalescing pattern). Caches result. Does NOT hardcode the ~310 municipality entries — derives them from the 13sw `Vaalipiiri ja kunta vaalivuonna` variable (format: `PPKKK0` where PP=prefix, KKK=kunta). Skips SSS and aggregate rows ending in `0000`.
+- `_clearKuntaToVaalipiiriCache()` — test helper.
+
+**Decision: lazy-load vs hardcode.** Initial attempt to hardcode ~310 entries produced duplicate keys and wrong assignments due to historical municipality mergers (e.g. '858' existed in both uusimaa and savo-karjala historically). The lazy-load approach derives the map from 13sw metadata, which already encodes the correct current state, avoiding transcription errors.
+
+**Scope limitation:** Regional elections (HV01–HV21 hyvinvointialue) do not map onto vaalipiiri boundaries — cross-election joins mixing `regional` with other types at vaalipiiri level are not supported. Documented in file header.
+
+**Test file:** `src/data/area-hierarchy.test.ts` — 21 tests covering all exports including cache coalescing and caching behavior.
+
+**Files changed:** `src/data/area-hierarchy.ts` (new), `src/data/area-hierarchy.test.ts` (new).
+
+**Build:** clean. **Tests:** 159/159 passed (21 new).

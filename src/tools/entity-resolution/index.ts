@@ -5,8 +5,8 @@ import { withCache } from '../../cache/cache.js';
 import {
   getElectionTables,
   getDatabasePath,
-  PARLIAMENTARY_TABLES,
 } from '../../data/election-tables.js';
+import type { ElectionType } from '../../data/types.js';
 
 // ─── Fuzzy matching utilities ────────────────────────────────────────────────
 
@@ -241,22 +241,29 @@ async function getAreaList(year = 2023): Promise<AreaEntry[]> {
   });
 }
 
-// ─── Candidate list builder (from per-vaalipiiri candidate table) ─────────────
+// ─── Candidate list builders ──────────────────────────────────────────────────
 
 interface CandidateEntry {
   candidate_id: string;
   candidate_name: string;
   party: string;
   vaalipiiri_name: string;
-  vaalipiiri_key: string;  // key in candidate_by_aanestysalue map
+  vaalipiiri_key: string;  // unit key: vaalipiiri, hyvinvointialue, or 'national'
   table_id: string;
 }
 
-async function getCandidateList(year: number, vaalipiiriKey: string): Promise<CandidateEntry[]> {
-  const tables = getElectionTables('parliamentary', year);
-  if (!tables?.candidate_by_aanestysalue) throw new Error(`No candidate tables for parliamentary ${year}`);
-  const tableId = tables.candidate_by_aanestysalue[vaalipiiriKey];
-  if (!tableId) throw new Error(`No candidate table for vaalipiiri '${vaalipiiriKey}' in ${year}`);
+/** Load candidates from a per-unit table (parliamentary/municipal/regional). */
+async function getCandidateListForUnit(
+  year: number,
+  unitKey: string,
+  electionType: ElectionType
+): Promise<CandidateEntry[]> {
+  const tables = getElectionTables(electionType, year);
+  if (!tables?.candidate_by_aanestysalue) {
+    throw new Error(`No per-unit candidate tables for ${electionType} ${year}`);
+  }
+  const tableId = tables.candidate_by_aanestysalue[unitKey];
+  if (!tableId) throw new Error(`No candidate table for unit '${unitKey}' in ${electionType} ${year}`);
   const dbPath = getDatabasePath(tables);
   const metadata = await fetchMetadataCached(dbPath, tableId);
   const candidateVar = metadata.variables.find((v) => v.code === 'Ehdokas');
@@ -269,18 +276,68 @@ async function getCandidateList(year: number, vaalipiiriKey: string): Promise<Ca
       candidate_id: code,
       candidate_name: parts[0]?.trim() ?? text,
       party: parts[1]?.trim() ?? '',
-      vaalipiiri_name: parts[2]?.trim() ?? vaalipiiriKey,
-      vaalipiiri_key: vaalipiiriKey,
+      vaalipiiri_name: parts[2]?.trim() ?? unitKey,
+      vaalipiiri_key: unitKey,
       table_id: tableId,
     };
   });
 }
 
-async function getCandidatesAllVaalipiirit(year: number): Promise<CandidateEntry[]> {
-  const tables = getElectionTables('parliamentary', year);
-  if (!tables?.candidate_by_aanestysalue) throw new Error(`No candidate tables for parliamentary ${year}`);
+/**
+ * Load candidates from the national table (EU parliament and presidential).
+ * EU: 247 candidates, national totals (14gy). Presidential: all candidates (14d5).
+ */
+async function getCandidatesFromNationalTable(
+  year: number,
+  electionType: ElectionType
+): Promise<CandidateEntry[]> {
+  const tables = getElectionTables(electionType, year);
+  if (!tables?.candidate_national) {
+    throw new Error(`No national candidate table for ${electionType} ${year}`);
+  }
+  const tableId = tables.candidate_national;
+  const dbPath = getDatabasePath(tables);
+  const metadata = await fetchMetadataCached(dbPath, tableId);
+  const candidateVar = metadata.variables.find((v) => v.code === 'Ehdokas');
+  if (!candidateVar) throw new Error('Ehdokas variable not found in national candidate table');
+
+  // Skip non-candidate summary codes (presidential: '00'=all, '11'=others)
+  const SKIP_CODES = new Set(['00', '11']);
+  const entries: CandidateEntry[] = [];
+  candidateVar.values.forEach((code, i) => {
+    if (SKIP_CODES.has(code)) return;
+    const text = candidateVar.valueTexts[i] ?? code;
+    const parts = text.split(' / ');
+    entries.push({
+      candidate_id: code,
+      candidate_name: parts[0]?.trim() ?? text,
+      party: parts[1]?.trim() ?? '',
+      vaalipiiri_name: 'national',
+      vaalipiiri_key: 'national',
+      table_id: tableId,
+    });
+  });
+  return entries;
+}
+
+/**
+ * Load all candidates for any election type.
+ * EU/presidential: fetches from single national table.
+ * Parliamentary/municipal/regional: fans out to all unit tables in parallel.
+ */
+async function getCandidatesAllUnits(
+  year: number,
+  electionType: ElectionType
+): Promise<CandidateEntry[]> {
+  if (electionType === 'eu_parliament' || electionType === 'presidential') {
+    return getCandidatesFromNationalTable(year, electionType);
+  }
+  const tables = getElectionTables(electionType, year);
+  if (!tables?.candidate_by_aanestysalue) {
+    throw new Error(`No candidate tables for ${electionType} ${year}`);
+  }
   const keys = Object.keys(tables.candidate_by_aanestysalue);
-  const results = await Promise.all(keys.map((k) => getCandidateList(year, k)));
+  const results = await Promise.all(keys.map((k) => getCandidateListForUnit(year, k, electionType)));
   return results.flat();
 }
 
@@ -493,20 +550,25 @@ export function registerEntityResolutionTools(server: McpServer): void {
   // ── resolve_candidate ─────────────────────────────────────────────────────
   server.tool(
     'resolve_candidate',
-    'Resolves a fuzzy candidate name to a canonical candidate_id and name. Requires specifying the vaalipiiri to limit the search (fetching all 13 vaalipiiri tables simultaneously would take ~30s). Use list_vaalipiirit or describe_election to find vaalipiiri keys.',
+    'Resolves a fuzzy candidate name to a canonical candidate_id for any Finnish election type. For EU parliament and presidential, all candidates are in a single national table — no unit_key needed. For parliamentary, municipal, and regional elections, providing unit_key (vaalipiiri or hyvinvointialue) speeds up the search; omitting it fans out to all ~13–21 tables in parallel (~15s).',
     {
-      query: z.string().max(200).describe('Candidate name to search for (full or partial, with or without surname-first format). Example: "Heinäluoma", "Eveliina Heinäluoma", "Heinaluoma Eveliina".'),
-      year: z.number().describe('Election year (e.g. 2023).'),
-      vaalipiiri: z.string().optional().describe('Vaalipiiri key to limit search scope (e.g. "helsinki", "uusimaa", "pirkanmaa"). Omit to search all 13 vaalipiirit — this requires 13 API calls and takes ~15s.'),
-      party: z.string().optional().describe('Party abbreviation to narrow results (e.g. "SDP", "KOK"). Case-insensitive, optional.'),
+      query: z.string().max(200).describe('Candidate name to search for (full or partial, surname-first or firstname-first). Examples: "Heinäluoma", "Eveliina Heinäluoma", "Heinaluoma Eveliina", "Atte Harjanne".'),
+      election_type: z.enum(['parliamentary', 'municipal', 'eu_parliament', 'presidential', 'regional']).describe('Election type. Determines which candidate tables to search.'),
+      year: z.number().describe('Election year (e.g. 2023, 2024, 2025).'),
+      unit_key: z.string().optional().describe('For parliamentary/municipal: vaalipiiri key (e.g. "helsinki", "pirkanmaa"). For regional: hyvinvointialue key (e.g. "pirkanmaa", "varsinais-suomi"). Ignored for EU parliament and presidential — those use a single national table.'),
+      party: z.string().optional().describe('Party abbreviation to narrow results (e.g. "SDP", "KOK", "VIHR"). Case-insensitive, optional.'),
     },
-    async ({ query, year, vaalipiiri, party }) => {
+    async ({ query, election_type, year, unit_key, party }) => {
+      const electionType: ElectionType = election_type;
       let candidates: CandidateEntry[];
       try {
-        if (vaalipiiri) {
-          candidates = await getCandidateList(year, vaalipiiri);
+        const isNationalOnly = electionType === 'eu_parliament' || electionType === 'presidential';
+        if (isNationalOnly) {
+          candidates = await getCandidatesFromNationalTable(year, electionType);
+        } else if (unit_key) {
+          candidates = await getCandidateListForUnit(year, unit_key, electionType);
         } else {
-          candidates = await getCandidatesAllVaalipiirit(year);
+          candidates = await getCandidatesAllUnits(year, electionType);
         }
       } catch (err) {
         return {
@@ -555,14 +617,15 @@ export function registerEntityResolutionTools(server: McpServer): void {
           content: [{
             type: 'text' as const,
             text: JSON.stringify({
-              error: `No candidate match found for query: "${query}"`,
-              suggestion: `Try using the official name format (surname first). ${vaalipiiri ? '' : 'Try specifying a vaalipiiri to narrow the search.'}`,
+              error: `No candidate match found for query: "${query}" in ${electionType} ${year}`,
+              suggestion: `Try using the official name format (surname first). ${unit_key ? '' : 'Try specifying a unit_key to narrow the search.'}`,
             }),
           }],
         };
       }
 
       const best = scored[0]!;
+      const isNational = best.vaalipiiri_key === 'national';
       return {
         content: [{
           type: 'text' as const,
@@ -570,17 +633,19 @@ export function registerEntityResolutionTools(server: McpServer): void {
             candidate_id: best.candidate_id,
             candidate_name: best.candidate_name,
             party: best.party,
-            vaalipiiri: best.vaalipiiri_name,
-            vaalipiiri_key: best.vaalipiiri_key,
+            unit: isNational ? 'national' : best.vaalipiiri_name,
+            unit_key: isNational ? undefined : best.vaalipiiri_key,
+            election_type: electionType,
+            year,
             match_confidence: confidenceLabel(best.score),
             possible_alternatives: scored.slice(1).map((c) => ({
               candidate_id: c.candidate_id,
               candidate_name: c.candidate_name,
               party: c.party,
-              vaalipiiri: c.vaalipiiri_name,
+              unit: c.vaalipiiri_key === 'national' ? undefined : c.vaalipiiri_name,
               score: Math.round(c.score * 100) / 100,
             })),
-            usage_note: 'Use candidate_id in get_candidate_results. Use vaalipiiri_key in get_candidate_results vaalipiiri parameter.',
+            usage_note: 'Use candidate_id in get_candidate_results. For parliamentary/municipal/regional, use unit_key as the vaalipiiri parameter.',
           }),
         }],
       };
@@ -596,7 +661,8 @@ export function registerEntityResolutionTools(server: McpServer): void {
         entity_type: z.enum(['candidate', 'party', 'area']).describe('Type of entity to resolve.'),
         query: z.string().max(200).describe('Name or label to resolve.'),
         year: z.number().optional().describe('Election year context. Defaults to 2023.'),
-        vaalipiiri: z.string().optional().describe('For candidates: vaalipiiri key to limit search scope.'),
+        election_type: z.enum(['parliamentary', 'municipal', 'eu_parliament', 'presidential', 'regional']).optional().describe('For candidates: election type. Defaults to parliamentary.'),
+        unit_key: z.string().optional().describe('For candidates: vaalipiiri or hyvinvointialue key to limit search scope.'),
         party: z.string().optional().describe('For candidates: party abbreviation to narrow results.'),
         area_level: z.enum(['kunta', 'vaalipiiri', 'koko_suomi']).optional().describe('For areas: restrict to area level.'),
       })).describe('List of entities to resolve. Maximum 20 per call.'),
@@ -682,11 +748,15 @@ export function registerEntityResolutionTools(server: McpServer): void {
 
         } else if (entity.entity_type === 'candidate') {
           try {
+            const eType: ElectionType = (entity.election_type as ElectionType | undefined) ?? 'parliamentary';
+            const isNationalOnly = eType === 'eu_parliament' || eType === 'presidential';
             let cands: CandidateEntry[];
-            if (entity.vaalipiiri) {
-              cands = await getCandidateList(year, entity.vaalipiiri);
+            if (isNationalOnly) {
+              cands = await getCandidatesFromNationalTable(year, eType);
+            } else if (entity.unit_key) {
+              cands = await getCandidateListForUnit(year, entity.unit_key, eType);
             } else {
-              cands = await getCandidatesAllVaalipiirit(year);
+              cands = await getCandidatesAllUnits(year, eType);
             }
             const partyNorm = entity.party ? entity.party.toLowerCase().trim() : null;
             const filtered = partyNorm ? cands.filter((c) => c.party.toLowerCase().includes(partyNorm)) : cands;
@@ -719,8 +789,8 @@ export function registerEntityResolutionTools(server: McpServer): void {
                 candidate_id: best.candidate_id,
                 candidate_name: best.candidate_name,
                 party: best.party,
-                vaalipiiri: best.vaalipiiri_name,
-                vaalipiiri_key: best.vaalipiiri_key,
+                unit: best.vaalipiiri_key === 'national' ? undefined : best.vaalipiiri_name,
+                unit_key: best.vaalipiiri_key === 'national' ? undefined : best.vaalipiiri_key,
                 match_confidence: confidenceLabel(best.score),
               };
             }
