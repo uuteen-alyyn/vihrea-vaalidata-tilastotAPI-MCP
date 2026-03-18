@@ -2,12 +2,23 @@ import type { PxWebResponse, PxWebColumn, PxWebTableMetadata } from '../api/type
 import type { ElectionRecord, ElectionType, AreaLevel } from './types.js';
 import type { PartyTableSchema } from './election-tables.js';
 
+// Keys that must never appear in objects built from external API data.
+const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+/**
+ * Safe alternative to Object.fromEntries that drops keys which could pollute
+ * Object.prototype if present in untrusted external data (e.g. PxWeb API).
+ */
+function safeFromEntries<V>(entries: [string, V][]): Record<string, V> {
+  return Object.fromEntries(entries.filter(([k]) => !FORBIDDEN_KEYS.has(k)));
+}
+
 /**
  * Builds a lookup from variable code → index in data row `key` array.
  * Only 'd' (dimension) and 't' (time) columns appear in key[].
  */
 export function buildKeyIndex(columns: PxWebColumn[]): Record<string, number> {
-  return Object.fromEntries(
+  return safeFromEntries(
     columns
       .filter((c) => c.type === 'd' || c.type === 't')
       .map((c, i) => [c.code, i])
@@ -19,7 +30,7 @@ export function buildKeyIndex(columns: PxWebColumn[]): Record<string, number> {
  * Only 'c' (measure) columns appear in values[].
  */
 export function buildValueIndex(columns: PxWebColumn[]): Record<string, number> {
-  return Object.fromEntries(
+  return safeFromEntries(
     columns
       .filter((c) => c.type === 'c')
       .map((c, i) => [c.code, i])

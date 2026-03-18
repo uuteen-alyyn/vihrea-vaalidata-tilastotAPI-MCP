@@ -31,17 +31,30 @@ const RATE_LIMIT_WINDOW_MS = parseInt(process.env.RATE_LIMIT_WINDOW_MS ?? '60000
 
 const ipTimestamps = new Map<string, number[]>();
 
+// Known trusted proxy IPs/ranges. X-Forwarded-For is only honoured when the
+// actual socket connection comes from one of these addresses. Direct clients
+// cannot spoof the header to bypass per-IP rate limiting.
+const TRUSTED_PROXY_LITERALS = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+function isTrustedProxy(ip: string): boolean {
+  if (TRUSTED_PROXY_LITERALS.has(ip)) return true;
+  // RFC-1918 private ranges (and their IPv4-mapped IPv6 equivalents)
+  return /^(::ffff:)?(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/.test(ip);
+}
+
 /**
- * Returns the client IP from the request, honouring X-Forwarded-For when the
- * server sits behind a reverse proxy (nginx/Cloudflare). Falls back to
- * socket.remoteAddress for direct connections.
+ * Returns the client IP from the request. X-Forwarded-For is only trusted
+ * when the socket connection originates from a known trusted proxy (loopback
+ * or RFC-1918). Otherwise the raw socket address is used to prevent spoofing.
  */
 function getClientIp(req: http.IncomingMessage): string {
-  const xff = req.headers['x-forwarded-for'];
-  if (typeof xff === 'string' && xff.length > 0) {
-    return xff.split(',')[0]!.trim();
+  const socketIp = req.socket.remoteAddress ?? '0.0.0.0';
+  if (isTrustedProxy(socketIp)) {
+    const xff = req.headers['x-forwarded-for'];
+    if (typeof xff === 'string' && xff.length > 0) {
+      return xff.split(',')[0]!.trim();
+    }
   }
-  return req.socket.remoteAddress ?? 'unknown';
+  return socketIp;
 }
 
 /**
@@ -74,6 +87,26 @@ setInterval(() => {
   }
 }, 5 * 60 * 1000);
 
+// ─── Security helpers ─────────────────────────────────────────────────────────
+
+const MAX_BODY_BYTES = 1_048_576; // 1 MB
+
+/** Sets standard defensive headers on every outgoing response. */
+function setSecurityHeaders(res: http.ServerResponse): void {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Content-Security-Policy', "default-src 'none'");
+}
+
+/**
+ * Strips control characters from user-supplied strings and truncates to 200
+ * chars. Use before including any external input in error messages to reduce
+ * prompt-injection surface.
+ */
+export function sanitizeForLog(s: unknown): string {
+  return String(s).replace(/[\x00-\x1f\x7f]/g, '').slice(0, 200);
+}
+
 // ─── MCP server + transport ───────────────────────────────────────────────────
 
 const server = new McpServer({
@@ -100,6 +133,19 @@ const httpServer = http.createServer((req, res) => {
     const duration = Date.now() - start;
     console.log(`${new Date().toISOString()} ${req.method} ${req.url} ${res.statusCode} ${duration}ms ip=${clientIp}`);
   });
+
+  // Set security headers on all responses we control. The transport-handled
+  // responses also pick these up because setHeader() writes to the same object.
+  setSecurityHeaders(res);
+
+  // Reject oversized requests before passing to the transport.
+  const contentLength = parseInt(req.headers['content-length'] ?? '0', 10);
+  if (contentLength > MAX_BODY_BYTES) {
+    const body = JSON.stringify({ error: 'Request body too large' });
+    res.writeHead(413, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) });
+    res.end(body);
+    return;
+  }
 
   if (!checkRateLimit(clientIp)) {
     const body = JSON.stringify({
