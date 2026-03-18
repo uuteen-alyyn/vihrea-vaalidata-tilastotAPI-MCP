@@ -30,8 +30,8 @@ Do **not reconstruct metrics manually** when MCP tools provide them. Treat MCP o
 
 | Election type | Party data | Candidate data |
 |---|---|---|
-| Parliamentary (eduskuntavaalit) | 1983–2023 (multi-year) | 2019, 2023 (per vaalipiiri) |
-| Municipal (kuntavaalit) | 1976–2025 (multi-year) | 2025 (per vaalipiiri) |
+| Parliamentary (eduskuntavaalit) | 1983–2023 (multi-year) | 2007, 2011, 2015, 2019, 2023 (per vaalipiiri) |
+| Municipal (kuntavaalit) | 1976–2025 (multi-year) | 2021, 2025 (per vaalipiiri) |
 | Regional (aluevaalit) | 2022–2025 (multi-year) | 2025 (per hyvinvointialue) |
 | EU Parliament (europarlamenttivaalit) | 1996–2024 (multi-year) | 2019, 2024 (national only) |
 | Presidential (presidentinvaalit) | — (no party dimension) | 2024 (national, 2 rounds) |
@@ -52,7 +52,8 @@ Do **not reconstruct metrics manually** when MCP tools provide them. Treat MCP o
 
 - **EU elections**: Finland is a single national constituency — no vaalipiiri split, no kunta-level candidate geography.
 - **Presidential elections**: No party dimension; two rounds (\`round: 1\` / \`round: 2\`). Party-dependent tools (rank_within_party, analyze_within_party_position) return N/A.
-- **Regional 2022 / Municipal 2021**: Party data available via multi-year tables; candidate-level data not available.
+- **Regional 2022**: Party data available via multi-year table; candidate-level data not available.
+- **Parliamentary 2011 / 2007**: Uses a 15-vaalipiiri boundary (pre-2012 reform). Keys differ from the 13-vaalipiiri list below — use \`kymi\`, \`etela-savo\`, \`pohjois-savo\`, \`pohjois-karjala\` instead of \`kaakkois-suomi\` / \`savo-karjala\`.
 - **Vote transfer proxy**: \`estimate_vote_transfer_proxy\` produces structural indicators from area co-movement, not direct voter-level measurements. Present results with this caveat. Call \`get_data_caveats\` for the full list.
 
 ## Worked examples

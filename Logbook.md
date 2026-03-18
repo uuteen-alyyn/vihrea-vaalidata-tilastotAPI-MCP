@@ -812,3 +812,21 @@ All four live tests passed:
 Added voter demographics coverage text to MCP system prompt in `server.ts`.
 
 **Build:** clean. **Tests:** 132/132 passed.
+
+---
+
+## PHASE 26: QUAL-6 SYSTEM PROMPT AUDIT — 2026-03-18
+
+Audited all data-coverage claims in `SYSTEM_PROMPT` (src/server.ts) against actual registrations in `src/data/election-tables.ts`.
+
+**Discrepancies found and fixed:**
+
+1. **Parliamentary candidate data** — system prompt said "2019, 2023"; actual registrations cover 2007, 2011, 2015, 2019, 2023. Fixed to list all five years.
+
+2. **Municipal candidate data** — system prompt said "2025 only"; actual registrations include 2021 and 2025. Fixed to list both.
+
+3. **Election-specific note** — the note "Regional 2022 / Municipal 2021: candidate-level data not available" incorrectly excluded municipal 2021, which *does* have candidate data. Split into a regional-only note and a new parliamentary 2011/2007 note about the pre-2012 15-vaalipiiri boundary (different district keys: `kymi`, `etela-savo`, `pohjois-savo`, `pohjois-karjala`).
+
+**No changes to code or data layer** — only the system prompt string in server.ts.
+
+**Build:** clean. **Tests:** 132/132 passed.

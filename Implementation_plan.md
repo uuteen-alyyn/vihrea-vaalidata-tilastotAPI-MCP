@@ -1666,11 +1666,179 @@ Service runs plain HTTP. TLS must be terminated at the infrastructure level (rev
 
 ---
 
-## Phase 26: Integration Tests & Live Validation ⬜ PLANNED
+## Phase 26: QUAL-6 System Prompt Audit ✅ COMPLETE
 
-**Goal:** Validate the full system end-to-end with a running MCP server against real election data. Also audit the registered MCP system prompt against `election-tables.ts` (QUAL-6 deferred from Phase 25).
+**Goal:** Cross-reference every data-coverage claim in `SYSTEM_PROMPT` (in `src/server.ts`) against the
+actual registrations in `src/data/election-tables.ts`. Fix any discrepancies found.
 
-**Reference:** `BACKLOG.md` — Phase 15 live test, Phase 16 system prompt test, QUAL-6
+**Why this doesn't need a live server:** The system prompt string is a TypeScript constant — it can be
+read directly from `server.ts`. The "live server required" note in Phase 25 was wrong.
+
+**Reference:** `BACKLOG.md` — QUAL-6
+
+---
+
+### Step 1 — Audit claims vs registrations
+
+Read `SYSTEM_PROMPT` and check every claim in the following sections:
+
+| Section | What to verify |
+|---|---|
+| Data coverage table (parliamentary) | Years listed for party data and candidate data |
+| Data coverage table (municipal) | Years listed for party data and candidate data |
+| Data coverage table (regional) | Years listed |
+| Data coverage table (EU parliament) | Years listed |
+| Data coverage table (presidential) | Rounds, candidate data |
+| Voter demographics — get_voter_background | Years per election type |
+| Voter demographics — get_voter_turnout_by_demographics | Valid year per election type |
+| Conventions — vaalipiiri keys | All 13 keys listed and correct |
+| Conventions — hyvinvointialue keys | All 21 keys listed and correct |
+
+Cross-reference source: `src/data/election-tables.ts` registrations.
+
+- [ ] Read SYSTEM_PROMPT in full
+- [ ] Verify each coverage claim against election-tables.ts
+- [ ] Note every discrepancy
+
+### Step 2 — Fix discrepancies
+
+- [ ] Update SYSTEM_PROMPT in `src/server.ts` for any incorrect coverage claims
+
+### Step final: Build + test
+
+- [ ] `npm run build` — must exit 0
+- [ ] `npm test` — all tests must pass
+- [ ] Commit: `Phase 26: system prompt coverage audit`
+- [ ] Push to GitHub
+- [ ] Logbook entry
+
+---
+
+## Phase 27: COST-3 Multi-Year Party Table Cache Fix ⬜ PLANNED
+
+**Goal:** `compare_elections` currently makes N separate Tilastokeskus API calls when comparing N years
+on the same multi-year party table (13sw, 14z7, 14y4, 14gv). After this fix, the 2nd+ year is a cache
+hit with zero API calls.
+
+**Reference:** `BACKLOG.md` — COST-3
+
+---
+
+### Background — root cause
+
+`loadPartyResults` in `src/data/loaders.ts` always adds a `Vuosi=year` filter to the API query and
+includes `year` in the cache key:
+```
+cacheKey = `data:${tableId}:${electionType}:${year}:${areaId ?? 'all'}`
+```
+Each year is therefore a separate cache entry even though all years live in the same PxWeb table.
+
+---
+
+### Design
+
+**Detection:** A table is multi-year if its metadata has a `Vuosi` variable **with more than one value**
+(i.e. `metadata.variables.find(v => v.code === 'Vuosi')?.values.length > 1`).
+Single-year tables (candidate tables, etc.) don't have a Vuosi variable at all, or have exactly one
+value — they keep the current behaviour unchanged.
+
+**Cache key (multi-year tables):**
+```
+`data:${tableId}:all_years:${areaId ?? 'all'}`
+```
+`electionType` is dropped because `tableId` already uniquely identifies the table.
+
+**API query (multi-year tables):**
+Remove the `Vuosi` filter entirely — fetch all years in one response.
+
+**Post-cache filtering:**
+After retrieval from cache, filter `response.data` to rows where
+`row.key[vuosiKeyIdx] === String(year)` before passing to the normalizer.
+`vuosiKeyIdx` is found from `response.columns` (type `'d'`).
+
+**Normalizer:** unchanged. It already receives a year parameter and sets it on each record.
+The response it sees is identical to what it receives today (year-filtered data).
+
+**Tradeoff:**
+- First request: fetches more data from API (all years). Acceptable — same network call count.
+- Cache entry: larger (all years combined). Acceptable — still one entry, bounded by 500-entry LRU.
+- Second request for different year: cache hit, zero API calls. This is the win.
+
+---
+
+### Step 1 — Implementation in `src/data/loaders.ts`
+
+Change `loadPartyResults` only. No other files change.
+
+Logic to add after fetching metadata:
+```typescript
+const vuosiValues = metadata.variables.find(v => v.code === 'Vuosi')?.values ?? [];
+const isMultiYear = vuosiValues.length > 1;
+```
+
+- [ ] For `isMultiYear === true`: omit Vuosi filter, use `all_years` cache key
+- [ ] For `isMultiYear === false`: keep current behaviour (year in key, Vuosi filter present)
+- [ ] After `withCache`: when `isMultiYear`, filter `response.data` to `key[vuosiKeyIdx] === String(year)`
+- [ ] Helper: find `vuosiKeyIdx` from `response.columns.filter(c => c.type === 'd')`
+
+### Step 2 — Tests in `src/data/loaders.test.ts` (or equivalent)
+
+- [ ] Multi-year table: verify cache key does not contain the year
+- [ ] Multi-year table: verify row filtering keeps only the requested year's rows
+- [ ] Single-year table: verify year still appears in cache key (regression guard)
+
+> If no loader unit tests currently exist, add tests to the normalizer test file or create
+> `src/data/loaders.cache.test.ts` with mocked `withCache`.
+
+### Step final: Build + test
+
+- [ ] `npm run build` — must exit 0
+- [ ] `npm test` — all tests must pass
+- [ ] Commit: `Phase 27: COST-3 multi-year party table cache fix`
+- [ ] Push to GitHub
+- [ ] Logbook entry
+
+---
+
+## Phase 28: TLS — Decision & Documentation ⬜ PLANNED
+
+**Goal:** Make a conscious, documented decision on TLS. Two options exist:
+
+### Option A — Infrastructure only (current, recommended)
+
+TLS is terminated at the reverse proxy / CDN layer (Cloudflare, nginx, Azure App Service TLS offload).
+The Node.js process serves plain HTTP on a private port; the proxy handles HTTPS.
+
+- **Pros:** Standard practice for Node.js services. No cert rotation logic in app code. Works with
+  any reverse proxy. Cert management is handled by the infrastructure layer.
+- **Cons:** Requires a reverse proxy to be configured before the service is safe to expose publicly.
+- **Action:** Confirm in `CLAUDE.md` and BACKLOG that this is the accepted design. Remove from BACKLOG
+  as it is resolved (not deferred).
+
+### Option B — Optional app-level HTTPS mode
+
+Add a second listen path to `server-http.ts` that starts `https.createServer()` when
+`TLS_CERT_FILE` and `TLS_KEY_FILE` env vars are set. Falls back to plain HTTP otherwise.
+
+- **Pros:** Server can serve HTTPS without a separate proxy.
+- **Cons:** Cert rotation requires restart. Adds startup complexity and new env var surface. Not
+  testable in unit tests. Node.js `https` module has no automatic renewal — certs expire silently.
+- **Action:** Implement only if explicitly requested.
+
+**Decision to make before coding:** Which option does the user want?
+
+- [ ] User confirms Option A or Option B
+- [ ] If A: update CLAUDE.md, close BACKLOG NEW-SEC-5
+- [ ] If B: implement, document, close BACKLOG NEW-SEC-5
+
+---
+
+## Phase 29: Live Tests (manual — user runs these) ⬜ PLANNED
+
+**Goal:** Validate the running server end-to-end. These cannot be automated — they require a live
+MCP server connected to Claude Desktop or an MCP client.
+
+**Reference:** `BACKLOG.md` — Phase 15 live test, Phase 16 system prompt test
 
 ---
 
@@ -1693,7 +1861,8 @@ Expected:
 
 ### Phase 16: Claude Desktop system prompt test
 
-Connect MCP server to Claude Desktop using the registered `system` prompt. Run a realistic analyst workflow:
+Connect MCP server to Claude Desktop using the registered `system` prompt. Run a realistic analyst
+workflow:
 1. Resolve a candidate
 2. Get their profile
 3. Compare their party across elections
