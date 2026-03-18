@@ -1094,3 +1094,18 @@ Added `scrape_candidate_trajectory` tool to `src/tools/comparison/index.ts`. Reg
 **Files changed:** `src/tools/comparison/index.ts` (added CANDIDATE_YEARS_BY_TYPE constant and tool registration), `src/server.ts` (system prompt updated).
 
 **Build:** clean. **Tests:** 159/159 passed (no regressions).
+
+---
+
+## PHASE E4: find_area_overperformance/underperformance area_level routing — 2026-03-19 00:47:00
+
+Added `area_level` parameter to both `find_area_overperformance` and `find_area_underperformance`. Fixed the routing so the requested area level is actually used.
+
+**Changes:**
+- **Party subject type:** was hardcoded to `subnatLevel(electionType)` (kunta for parl/municipal, vaalipiiri for EU/presidential). Now uses user-specified `area_level` with `subnatLevel` as default. Party tables already contain rows at all levels, so this is a trivial filter change.
+- **Candidate subject type + `area_level: 'kunta'`:** NEW — aggregates äänestysalue rows → kunta using `parseKuntaCode` (D2). Totals all candidate votes per kunta code, computes vote_share vs kunta total votes. area_id = 3-digit kunta code; area_name = best-effort from first äänestysalue name (strip trailing district number). Only available for parliamentary/municipal/presidential.
+- **Candidate subject type + default/`aanestysalue`:** existing behavior preserved (raw äänestysalue rows, no change).
+
+**Files changed:** `src/tools/analytics/index.ts` (added `parseKuntaCode` import, rewrote both tools' candidate branch to handle area_level, added area_level param schema to both).
+
+**Build:** clean. **Tests:** 159/159 passed (no regressions).

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { loadPartyResults, loadCandidateResults } from '../../data/loaders.js';
 import type { ElectionRecord, ElectionType, AreaLevel } from '../../data/types.js';
 import { ELECTION_TYPE_PARAM, subnatLevel, matchesParty, pct, round2, mcpText, errResult } from '../shared.js';
+import { parseKuntaCode } from '../../data/area-hierarchy.js';
 
 // ─── Shared caveats ───────────────────────────────────────────────────────────
 
@@ -421,12 +422,18 @@ export function registerAnalyticsTools(server: McpServer): void {
       subject_type: z.enum(['party', 'candidate']).describe('Whether to analyse a party or a candidate.'),
       subject_id: z.string().describe('Party abbreviation (e.g. "KOK") or candidate_id (e.g. "01010176").'),
       unit_key: z.string().optional().describe('Required when subject_type=candidate (vaalipiiri/hyvinvointialue key). Omit for EU/presidential.'),
+      area_level: z.enum(['aanestysalue', 'kunta', 'vaalipiiri', 'hyvinvointialue']).optional().describe(
+        'Geographic level for the overperformance analysis. ' +
+        'For parties: filters rows at the requested level (default = kunta for parl/municipal, vaalipiiri for EU/presidential, hyvinvointialue for regional). ' +
+        'For candidates: aanestysalue = raw per-district (default); kunta = aggregate äänestysalue → kunta using parseKuntaCode. ' +
+        'Kunta aggregation requires parliamentary, municipal, or presidential election type.'
+      ),
       min_votes: z.number().optional().describe('Minimum votes in an area to include in results. Defaults to 10.'),
     },
-    async ({ year, election_type, subject_type, subject_id, unit_key, min_votes = 10 }) => {
+    async ({ year, election_type, subject_type, subject_id, unit_key, area_level, min_votes = 10 }) => {
       const electionType: ElectionType = election_type ?? 'parliamentary';
-      const areaLvl = subnatLevel(electionType);
       if (subject_type === 'party') {
+        const areaLvl: AreaLevel = (area_level as AreaLevel | undefined) ?? subnatLevel(electionType);
         let rows: ElectionRecord[];
         let tableId: string;
         try {
@@ -466,6 +473,7 @@ export function registerAnalyticsTools(server: McpServer): void {
           subject_id,
           year,
           election_type: electionType,
+          area_level: areaLvl,
           baseline_pct: pct(baseline),
           baseline_description: 'National vote share',
           overperforming_areas: overperf.filter((a) => a.overperformance_pp > 0),
@@ -495,41 +503,107 @@ export function registerAnalyticsTools(server: McpServer): void {
         const baseline = vpRow.vote_share;
         if (!baseline) return errResult(`No unit-level vote share for candidate ${subject_id}.`);
 
-        // POL-10: total votes per äänestysalue for area-size context
-        const areaTotals = new Map<string, number>();
-        for (const r of allRows.filter((r) => r.area_level === 'aanestysalue')) {
-          areaTotals.set(r.area_id, (areaTotals.get(r.area_id) ?? 0) + r.votes);
-        }
+        const requestedLevel = area_level ?? 'aanestysalue';
 
-        const aalueRows = allRows.filter((r) => r.candidate_id === subject_id && r.area_level === 'aanestysalue' && r.votes >= min_votes);
-        const overperf = aalueRows
-          .filter((r) => r.vote_share !== undefined)
-          .map((r) => ({
-            area_id: r.area_id,
-            area_name: r.area_name,
-            votes: r.votes,
-            area_total_votes: areaTotals.get(r.area_id) ?? null,
-            area_vote_share_pct: pct(r.vote_share!),
+        if (requestedLevel === 'kunta') {
+          // Aggregate äänestysalue → kunta using parseKuntaCode (D2)
+          if (!['parliamentary', 'municipal', 'presidential'].includes(electionType)) {
+            return errResult('Kunta-level aggregation is only available for parliamentary, municipal, and presidential elections.');
+          }
+          // Sum total votes per kunta (all candidates)
+          const kuntaTotals = new Map<string, number>();
+          const kuntaNames = new Map<string, string>();
+          for (const r of allRows.filter((r) => r.area_level === 'aanestysalue')) {
+            const kCode = parseKuntaCode(r.area_id, electionType);
+            if (!kCode) continue;
+            kuntaTotals.set(kCode, (kuntaTotals.get(kCode) ?? 0) + r.votes);
+            if (!kuntaNames.has(kCode)) {
+              // Derive kunta name: strip trailing district number from äänestysalue name
+              kuntaNames.set(kCode, r.area_name.replace(/\s+\d+\w*$/, '').trim() || kCode);
+            }
+          }
+          // Sum candidate votes per kunta
+          const candKuntaVotes = new Map<string, number>();
+          for (const r of allRows.filter((r) => r.candidate_id === subject_id && r.area_level === 'aanestysalue')) {
+            const kCode = parseKuntaCode(r.area_id, electionType);
+            if (!kCode) continue;
+            candKuntaVotes.set(kCode, (candKuntaVotes.get(kCode) ?? 0) + r.votes);
+          }
+
+          const overperf = [...candKuntaVotes.entries()]
+            .filter(([, votes]) => votes >= min_votes)
+            .map(([kCode, votes]) => {
+              const total = kuntaTotals.get(kCode) ?? 1;
+              const share = votes / total;
+              return {
+                area_id: kCode,
+                area_name: kuntaNames.get(kCode) ?? kCode,
+                votes,
+                area_total_votes: total,
+                area_vote_share_pct: pct(share),
+                baseline_pct: pct(baseline),
+                overperformance_pp: round2(share - baseline),
+              };
+            })
+            .sort((a, b) => b.overperformance_pp - a.overperformance_pp);
+
+          return mcpText({
+            subject_type: 'candidate',
+            subject_id,
+            candidate_name: vpRow.candidate_name,
+            year,
+            election_type: electionType,
+            unit_key: unit_key ?? 'national',
+            area_level: 'kunta',
             baseline_pct: pct(baseline),
-            overperformance_pp: round2(r.vote_share! - baseline),
-          }))
-          .sort((a, b) => b.overperformance_pp - a.overperformance_pp);
+            baseline_description: 'Candidate vote share at unit (vaalipiiri/hyvinvointialue) level',
+            overperforming_areas: overperf.filter((a) => a.overperformance_pp > 0),
+            method: {
+              description: 'Baseline = candidate unit-level share. Kunta votes aggregated from äänestysalue via parseKuntaCode. ' +
+                           'area_id = 3-digit kunta code. area_name derived from äänestysalue names (best-effort).',
+              source_table: tableId,
+            },
+          });
 
-        return mcpText({
-          subject_type: 'candidate',
-          subject_id,
-          candidate_name: vpRow.candidate_name,
-          year,
-          election_type: electionType,
-          unit_key: unit_key ?? 'national',
-          baseline_pct: pct(baseline),
-          baseline_description: 'Candidate vote share at unit level',
-          overperforming_areas: overperf.filter((a) => a.overperformance_pp > 0),
-          method: {
-            description: 'Baseline = candidate vote share in unit aggregate row. Overperformance = äänestysalue_share - baseline.',
-            source_table: tableId,
-          },
-        });
+        } else {
+          // Default: äänestysalue level (original behavior)
+          // POL-10: total votes per äänestysalue for area-size context
+          const areaTotals = new Map<string, number>();
+          for (const r of allRows.filter((r) => r.area_level === 'aanestysalue')) {
+            areaTotals.set(r.area_id, (areaTotals.get(r.area_id) ?? 0) + r.votes);
+          }
+
+          const aalueRows = allRows.filter((r) => r.candidate_id === subject_id && r.area_level === 'aanestysalue' && r.votes >= min_votes);
+          const overperf = aalueRows
+            .filter((r) => r.vote_share !== undefined)
+            .map((r) => ({
+              area_id: r.area_id,
+              area_name: r.area_name,
+              votes: r.votes,
+              area_total_votes: areaTotals.get(r.area_id) ?? null,
+              area_vote_share_pct: pct(r.vote_share!),
+              baseline_pct: pct(baseline),
+              overperformance_pp: round2(r.vote_share! - baseline),
+            }))
+            .sort((a, b) => b.overperformance_pp - a.overperformance_pp);
+
+          return mcpText({
+            subject_type: 'candidate',
+            subject_id,
+            candidate_name: vpRow.candidate_name,
+            year,
+            election_type: electionType,
+            unit_key: unit_key ?? 'national',
+            area_level: 'aanestysalue',
+            baseline_pct: pct(baseline),
+            baseline_description: 'Candidate vote share at unit level',
+            overperforming_areas: overperf.filter((a) => a.overperformance_pp > 0),
+            method: {
+              description: 'Baseline = candidate vote share in unit aggregate row. Overperformance = äänestysalue_share - baseline.',
+              source_table: tableId,
+            },
+          });
+        }
       }
     }
   );
@@ -544,12 +618,16 @@ export function registerAnalyticsTools(server: McpServer): void {
       subject_type: z.enum(['party', 'candidate']).describe('Whether to analyse a party or a candidate.'),
       subject_id: z.string().describe('Party abbreviation (e.g. "KOK") or candidate_id (e.g. "01010176").'),
       unit_key: z.string().optional().describe('Required when subject_type=candidate (vaalipiiri/hyvinvointialue key). Omit for EU/presidential.'),
+      area_level: z.enum(['aanestysalue', 'kunta', 'vaalipiiri', 'hyvinvointialue']).optional().describe(
+        'Geographic level. For parties: filters rows at this level (default = kunta/vaalipiiri/hyvinvointialue by type). ' +
+        'For candidates: aanestysalue = raw (default); kunta = aggregate äänestysalue → kunta (parliamentary/municipal/presidential only).'
+      ),
       min_votes: z.number().optional().describe('Minimum votes in area to include. Defaults to 10.'),
     },
-    async ({ year, election_type, subject_type, subject_id, unit_key, min_votes = 10 }) => {
+    async ({ year, election_type, subject_type, subject_id, unit_key, area_level, min_votes = 10 }) => {
       const electionType: ElectionType = election_type ?? 'parliamentary';
-      const areaLvl = subnatLevel(electionType);
       if (subject_type === 'party') {
+        const areaLvl: AreaLevel = (area_level as AreaLevel | undefined) ?? subnatLevel(electionType);
         let rows: ElectionRecord[];
         let tableId: string;
         try {
@@ -589,6 +667,7 @@ export function registerAnalyticsTools(server: McpServer): void {
           subject_id,
           year,
           election_type: electionType,
+          area_level: areaLvl,
           baseline_pct: pct(baseline),
           baseline_description: 'National vote share',
           underperforming_areas: underperf,
@@ -618,41 +697,103 @@ export function registerAnalyticsTools(server: McpServer): void {
         const baseline = vpRow.vote_share;
         if (!baseline) return errResult(`No unit-level vote share for candidate ${subject_id}.`);
 
-        // POL-10: area total votes for size context (consistent with find_area_overperformance)
-        const areaTotalsC = new Map<string, number>();
-        for (const r of allRows.filter((r) => r.area_level === 'aanestysalue')) {
-          areaTotalsC.set(r.area_id, (areaTotalsC.get(r.area_id) ?? 0) + r.votes);
-        }
+        const requestedLevel = area_level ?? 'aanestysalue';
 
-        const aalueRows = allRows.filter((r) => r.candidate_id === subject_id && r.area_level === 'aanestysalue' && r.votes >= min_votes);
-        const underperf = aalueRows
-          .filter((r) => r.vote_share !== undefined && r.vote_share < baseline)
-          .map((r) => ({
-            area_id: r.area_id,
-            area_name: r.area_name,
-            votes: r.votes,
-            area_total_votes: areaTotalsC.get(r.area_id) ?? null,
-            area_vote_share_pct: pct(r.vote_share!),
+        if (requestedLevel === 'kunta') {
+          if (!['parliamentary', 'municipal', 'presidential'].includes(electionType)) {
+            return errResult('Kunta-level aggregation is only available for parliamentary, municipal, and presidential elections.');
+          }
+          const kuntaTotals = new Map<string, number>();
+          const kuntaNames = new Map<string, string>();
+          for (const r of allRows.filter((r) => r.area_level === 'aanestysalue')) {
+            const kCode = parseKuntaCode(r.area_id, electionType);
+            if (!kCode) continue;
+            kuntaTotals.set(kCode, (kuntaTotals.get(kCode) ?? 0) + r.votes);
+            if (!kuntaNames.has(kCode)) {
+              kuntaNames.set(kCode, r.area_name.replace(/\s+\d+\w*$/, '').trim() || kCode);
+            }
+          }
+          const candKuntaVotes = new Map<string, number>();
+          for (const r of allRows.filter((r) => r.candidate_id === subject_id && r.area_level === 'aanestysalue')) {
+            const kCode = parseKuntaCode(r.area_id, electionType);
+            if (!kCode) continue;
+            candKuntaVotes.set(kCode, (candKuntaVotes.get(kCode) ?? 0) + r.votes);
+          }
+
+          const underperf = [...candKuntaVotes.entries()]
+            .filter(([, votes]) => votes >= min_votes)
+            .map(([kCode, votes]) => {
+              const total = kuntaTotals.get(kCode) ?? 1;
+              const share = votes / total;
+              return {
+                area_id: kCode,
+                area_name: kuntaNames.get(kCode) ?? kCode,
+                votes,
+                area_total_votes: total,
+                area_vote_share_pct: pct(share),
+                baseline_pct: pct(baseline),
+                underperformance_pp: round2(baseline - share),
+              };
+            })
+            .filter((r) => r.underperformance_pp > 0)
+            .sort((a, b) => b.underperformance_pp - a.underperformance_pp);
+
+          return mcpText({
+            subject_type: 'candidate',
+            subject_id,
+            candidate_name: vpRow.candidate_name,
+            year,
+            election_type: electionType,
+            unit_key: unit_key ?? 'national',
+            area_level: 'kunta',
             baseline_pct: pct(baseline),
-            underperformance_pp: round2(baseline - r.vote_share!),
-          }))
-          .sort((a, b) => b.underperformance_pp - a.underperformance_pp);
+            baseline_description: 'Candidate vote share at unit (vaalipiiri/hyvinvointialue) level',
+            underperforming_areas: underperf,
+            method: {
+              description: 'Baseline = candidate unit-level share. Kunta votes aggregated from äänestysalue via parseKuntaCode. ' +
+                           'area_id = 3-digit kunta code. area_name derived from äänestysalue names (best-effort).',
+              source_table: tableId,
+            },
+          });
 
-        return mcpText({
-          subject_type: 'candidate',
-          subject_id,
-          candidate_name: vpRow.candidate_name,
-          year,
-          election_type: electionType,
-          unit_key: unit_key ?? 'national',
-          baseline_pct: pct(baseline),
-          baseline_description: 'Candidate vote share at unit level',
-          underperforming_areas: underperf,
-          method: {
-            description: 'Baseline = candidate vote share in unit aggregate row. Underperformance = baseline - äänestysalue_share.',
-            source_table: tableId,
-          },
-        });
+        } else {
+          // Default: äänestysalue level
+          const areaTotalsC = new Map<string, number>();
+          for (const r of allRows.filter((r) => r.area_level === 'aanestysalue')) {
+            areaTotalsC.set(r.area_id, (areaTotalsC.get(r.area_id) ?? 0) + r.votes);
+          }
+
+          const aalueRows = allRows.filter((r) => r.candidate_id === subject_id && r.area_level === 'aanestysalue' && r.votes >= min_votes);
+          const underperf = aalueRows
+            .filter((r) => r.vote_share !== undefined && r.vote_share < baseline)
+            .map((r) => ({
+              area_id: r.area_id,
+              area_name: r.area_name,
+              votes: r.votes,
+              area_total_votes: areaTotalsC.get(r.area_id) ?? null,
+              area_vote_share_pct: pct(r.vote_share!),
+              baseline_pct: pct(baseline),
+              underperformance_pp: round2(baseline - r.vote_share!),
+            }))
+            .sort((a, b) => b.underperformance_pp - a.underperformance_pp);
+
+          return mcpText({
+            subject_type: 'candidate',
+            subject_id,
+            candidate_name: vpRow.candidate_name,
+            year,
+            election_type: electionType,
+            unit_key: unit_key ?? 'national',
+            area_level: 'aanestysalue',
+            baseline_pct: pct(baseline),
+            baseline_description: 'Candidate vote share at unit level',
+            underperforming_areas: underperf,
+            method: {
+              description: 'Baseline = candidate vote share in unit aggregate row. Underperformance = baseline - äänestysalue_share.',
+              source_table: tableId,
+            },
+          });
+        }
       }
     }
   );
