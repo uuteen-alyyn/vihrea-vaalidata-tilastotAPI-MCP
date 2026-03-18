@@ -14,7 +14,15 @@ export const ELECTION_TYPE_PARAM = z.enum(['parliamentary', 'municipal', 'eu_par
 
 // ─── Election-type helpers ────────────────────────────────────────────────────
 
-/** Returns the finest sub-national area level with kunta-like breakdown for each election type. */
+/**
+ * Returns the finest sub-national area level with meaningful party-vote breakdown
+ * for each election type.
+ *
+ * POL-15 verification: EU elections return 'vaalipiiri' — correct for party tables
+ * (14gv has Vaalipiiri ja kuntamuoto area variable). Candidate tools override this
+ * to 'koko_suomi' explicitly because Finland is a single EU constituency with no
+ * per-vaalipiiri candidate breakdown.
+ */
 export function subnatLevel(type: ElectionType): AreaLevel {
   if (type === 'regional') return 'hyvinvointialue';
   if (type === 'eu_parliament' || type === 'presidential') return 'vaalipiiri';

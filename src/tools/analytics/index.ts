@@ -353,11 +353,13 @@ export function registerAnalyticsTools(server: McpServer): void {
         year: number;
         votes: number | null;
         vote_share_pct: number | null;
+        _raw_vote_share: number | null;
         rank: number | null;
         error?: string;
       }> = [];
       const tableIds: string[] = [];
 
+      // _raw_vote_share is kept unrounded for accurate change computation (POL-9/STAT-4)
       const yearResultsUnsorted = await Promise.all(years.map(async (year) => {
         try {
           const { rows, tableId } = await loadPartyResults(year, effectiveArea, electionType);
@@ -368,24 +370,27 @@ export function registerAnalyticsTools(server: McpServer): void {
             year,
             votes: row?.votes ?? null,
             vote_share_pct: row?.vote_share ? pct(row.vote_share) : null,
+            _raw_vote_share: row?.vote_share ?? null,
             rank: row ? (rank || null) : null,
           };
         } catch (err) {
           console.error(`[compare_elections] failed to load year ${year}:`, err);
-          return { year, votes: null, vote_share_pct: null, rank: null, error: `No data for ${year}` };
+          return { year, votes: null, vote_share_pct: null, _raw_vote_share: null, rank: null, error: `No data for ${year}` };
         }
       }));
       yearResults.push(...yearResultsUnsorted.sort((a, b) => a.year - b.year));
 
-      // Compute changes between consecutive years
+      // Compute changes between consecutive years.
+      // POL-9/STAT-4: derive vote_share_change_pp from raw (unrounded) values before rounding
+      // to avoid compounding rounding errors from pct()-rounded inputs.
       const changes = yearResults.slice(1).map((curr, i) => {
         const prev = yearResults[i]!;
         return {
           from_year: prev.year,
           to_year: curr.year,
           vote_change: (curr.votes !== null && prev.votes !== null) ? curr.votes - prev.votes : null,
-          vote_share_change_pp: (curr.vote_share_pct !== null && prev.vote_share_pct !== null)
-            ? round2(curr.vote_share_pct - prev.vote_share_pct)
+          vote_share_change_pp: (curr._raw_vote_share !== null && prev._raw_vote_share !== null)
+            ? round2(curr._raw_vote_share - prev._raw_vote_share)
             : null,
           rank_change: (curr.rank !== null && prev.rank !== null) ? prev.rank - curr.rank : null, // positive = improved
         };
@@ -395,7 +400,8 @@ export function registerAnalyticsTools(server: McpServer): void {
         party_id,
         election_type: electionType,
         area_id: effectiveArea,
-        by_year: yearResults,
+        // Strip internal _raw_vote_share from output
+        by_year: yearResults.map(({ _raw_vote_share: _r, ...rest }) => rest),
         changes,
         method: {
           description: 'Votes and shares from party table. Rank is relative to all parties in the same area per year. vote_share_change_pp = percentage point change. rank_change: positive = moved up (better).',
@@ -435,6 +441,12 @@ export function registerAnalyticsTools(server: McpServer): void {
         const baseline = nationalRow?.vote_share;
         if (!baseline) return errResult(`No national vote share found for party "${subject_id}" in ${year}.`);
 
+        // POL-10: build area total-votes map so consumers can contextualise magnitude
+        const areaTotals = new Map<string, number>();
+        for (const r of rows.filter((r) => r.area_level === areaLvl && r.party_id !== 'SSS')) {
+          areaTotals.set(r.area_id, (areaTotals.get(r.area_id) ?? 0) + r.votes);
+        }
+
         const subnatRows = rows.filter((r) => matchesParty(r, subject_id) && r.area_level === areaLvl && r.votes >= min_votes);
         const overperf = subnatRows
           .filter((r) => r.vote_share !== undefined)
@@ -442,6 +454,7 @@ export function registerAnalyticsTools(server: McpServer): void {
             area_id: r.area_id,
             area_name: r.area_name,
             votes: r.votes,
+            area_total_votes: areaTotals.get(r.area_id) ?? null,
             area_vote_share_pct: pct(r.vote_share!),
             baseline_pct: pct(baseline),
             overperformance_pp: round2(r.vote_share! - baseline),
@@ -482,6 +495,12 @@ export function registerAnalyticsTools(server: McpServer): void {
         const baseline = vpRow.vote_share;
         if (!baseline) return errResult(`No unit-level vote share for candidate ${subject_id}.`);
 
+        // POL-10: total votes per äänestysalue for area-size context
+        const areaTotals = new Map<string, number>();
+        for (const r of allRows.filter((r) => r.area_level === 'aanestysalue')) {
+          areaTotals.set(r.area_id, (areaTotals.get(r.area_id) ?? 0) + r.votes);
+        }
+
         const aalueRows = allRows.filter((r) => r.candidate_id === subject_id && r.area_level === 'aanestysalue' && r.votes >= min_votes);
         const overperf = aalueRows
           .filter((r) => r.vote_share !== undefined)
@@ -489,6 +508,7 @@ export function registerAnalyticsTools(server: McpServer): void {
             area_id: r.area_id,
             area_name: r.area_name,
             votes: r.votes,
+            area_total_votes: areaTotals.get(r.area_id) ?? null,
             area_vote_share_pct: pct(r.vote_share!),
             baseline_pct: pct(baseline),
             overperformance_pp: round2(r.vote_share! - baseline),
@@ -835,13 +855,17 @@ export function registerAnalyticsTools(server: McpServer): void {
         const idx = Math.min(9, Math.floor((v - min) / bucketSize));
         counts[idx]++;
       }
-      const buckets = counts
+      const rawBuckets = counts
         .map((count, i) => ({
           from: min + i * bucketSize,
           to: min + (i + 1) * bucketSize - 1,
           count,
         }))
         .filter((b) => b.from <= max);
+      // STAT-3: clamp last bucket's `to` to actual data max to avoid arithmetic overshoot
+      const buckets = rawBuckets.map((b, i) =>
+        i === rawBuckets.length - 1 ? { ...b, to: max } : b
+      );
 
       return mcpText({
         subject_type,
@@ -952,25 +976,41 @@ export function registerAnalyticsTools(server: McpServer): void {
         );
       }
       if (uniqueTypes.includes('eu_parliament')) {
+        // POL-13: expanded EU caveat with turnout ratio and second-order election reference
         caveats.push(
-          'EU election vote share has a different denominator (EU citizens in Finland can vote here). ' +
-          'EU turnout is typically much lower than national elections, which affects the share values.'
+          'EU Parliament elections are second-order elections (Reif & Schmitt 1980): Finnish EU turnout ' +
+          'is typically ~40% vs ~70–75% in parliamentary elections. The EU electorate is self-selected ' +
+          '— lower-salience voters disproportionately abstain. EU vote shares and trends are structurally ' +
+          'incomparable to national elections. Additionally, non-Finnish EU citizens residing in Finland ' +
+          'may vote here rather than in their home country, slightly changing the eligible electorate.'
         );
       }
       if (uniqueTypes.includes('municipal')) {
+        // POL-14: quantified municipal electorate caveat
         caveats.push(
-          'Municipal vote share at national level sums votes across all municipalities. ' +
-          'Parties without candidates in all municipalities will have lower national shares.'
+          'Municipal elections allow all permanent residents aged 18+ to vote — including non-citizens ' +
+          '(unlike parliamentary elections which require Finnish citizenship). This expands the eligible ' +
+          'electorate by roughly 2–3% of eligible voters nationally. Vote shares are not directly ' +
+          'comparable between municipal and parliamentary elections for parties with different support ' +
+          'profiles among non-citizen residents. Municipal vote share also sums across all municipalities; ' +
+          'parties without candidates everywhere will have lower national shares.'
+        );
+      }
+      if (uniqueTypes.includes('eu_parliament') && uniqueTypes.includes('municipal')) {
+        caveats.push(
+          'This comparison includes both EU and municipal elections alongside parliamentary elections. ' +
+          'All three have different electorates and dynamics — treat trends as directional indicators only.'
         );
       }
 
       return mcpText({
         party_query: party,
-        results,
+        // POL-6: caveats appear before results so LLM consumers see warnings first
         caveats,
         comparability_notes: Object.fromEntries(
           uniqueTypes.map((t) => [t, comparabilityNotes[t] ?? ''])
         ),
+        results,
         method: {
           description:
             'National vote totals and shares loaded from each election\'s party-by-kunta table ' +
