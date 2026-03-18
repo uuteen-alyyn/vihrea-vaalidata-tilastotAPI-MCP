@@ -115,6 +115,8 @@ npm test        # Vitest test suite (src/**/*.test.ts)
 
 ## Deployment Notes
 
+- **Target platform: Azure App Service (NGO free plan).** Azure terminates TLS at the infrastructure level — the Node.js process serves plain HTTP on its internal port; Azure provides the public HTTPS endpoint. No application-level TLS code is needed or appropriate.
+
 - **Rate limiter is per-process.** The in-process sliding-window rate limiter in `server-http.ts` counts requests per IP within each Node.js instance. In a multi-instance deployment (e.g. Azure App Service with multiple workers), the effective limit is `RATE_LIMIT_REQUESTS × instance-count`. For global enforcement across instances, swap in a Redis-backed counter (see NEW-SEC-8 comment in `server-http.ts`). Until then, keep instance count = 1.
 
 ## Development Notes

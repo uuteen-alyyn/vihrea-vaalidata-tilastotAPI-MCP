@@ -5,22 +5,9 @@ Persistent work queue. Items are added when requested and removed only when expl
 
 ---
 
-## 🔴 Critical (fix before production use)
-
-### NEW-SEC-5: No TLS
-- **File:** `src/server-http.ts`
-- **Issue:** Service runs plain HTTP.
-- **Fix:** Infrastructure-level — reverse proxy, Cloudflare, or Azure TLS offload. No application code change needed.
-
----
-
 ## 🟡 Medium priority
 
-### COST-3: Year in cache key causes redundant API calls in `compare_elections`
-- **Issue:** Each election year is a separate cache entry; `compare_elections` calls the API N times when data could be batched. Investigated Phase 24 — architectural change needed; deferred indefinitely.
-
-### QUAL-6: System prompt data coverage audit
-- **Issue:** Must be done via live server (system prompt registered at runtime via `server.registerPrompt()`). Deferred to Phase 26 live tests.
+_(no open items)_
 
 ---
 

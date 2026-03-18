@@ -1800,7 +1800,7 @@ const isMultiYear = vuosiValues.length > 1;
 
 ---
 
-## Phase 28: TLS — Decision & Documentation ⬜ PLANNED
+## Phase 28: TLS — Decision & Documentation ✅ COMPLETE
 
 **Goal:** Make a conscious, documented decision on TLS. Two options exist:
 

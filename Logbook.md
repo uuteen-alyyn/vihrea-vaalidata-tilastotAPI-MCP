@@ -850,3 +850,16 @@ Single-year tables are unchanged (existing cache key pattern preserved).
 **New test file:** `src/data/loaders.cache.test.ts` — 6 tests for `filterResponseByYear`: correct year filtering, empty result for absent year, Vuosi not in first column position, no-Vuosi passthrough.
 
 **Build:** clean. **Tests:** 138/138 passed (6 new).
+
+---
+
+## PHASE 28: TLS DECISION — 2026-03-18
+
+**Decision:** No application-level TLS code. Deployment target is Azure App Service (NGO free plan), which terminates TLS at the infrastructure level. The Node.js process serves plain HTTP on its internal port; Azure provides the public HTTPS endpoint.
+
+**Actions:**
+- Updated `CLAUDE.md` deployment section to document the Azure target and rationale.
+- Removed NEW-SEC-5 from BACKLOG (resolved — infrastructure handles it).
+- Removed COST-3 and QUAL-6 from BACKLOG (both resolved in Phases 27 and 26 respectively).
+
+No code changes.
