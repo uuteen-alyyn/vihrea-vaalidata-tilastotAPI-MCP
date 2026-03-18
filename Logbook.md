@@ -1030,3 +1030,28 @@ Created `src/data/query-engine.ts` and registered `query_election_data` MCP tool
 **Files changed:** `src/data/normalizer.ts`, `src/data/loaders.ts`, `src/data/query-engine.ts` (new), `src/tools/retrieval/index.ts`.
 
 **Build:** clean. **Tests:** 159/159 passed (no regressions).
+
+---
+
+## PHASE C3: compare_across_dimensions — 2026-03-19 00:30:00
+
+Created `src/tools/comparison/index.ts` with `compare_across_dimensions` tool and registered it in `server.ts`.
+
+**Purpose:** The primary cross-election comparison tool. Given a subject (party or candidate), a list of elections, and an area level, returns a structured table with pp-change (percentage-point change) computed between consecutive elections of the same type.
+
+**`vary` modes:**
+- `vary='election'` (one subject, multiple elections): rows = elections, columns = areas. Most common mode — answers "how did VIHR do across parliamentary 2019/2023 and municipal 2025?"
+- `vary='subject'` (multiple subjects, multiple elections): rows = subjects with nested election columns. Answers "compare VIHR vs SDP vs VAS across the same elections."
+
+**PP-change computation:**
+- Tracks last seen `vote_share_pct` per (subject × area_id × election_type)
+- PP-change = `current - previous` for the same election_type only, sorted by order in the user's elections list
+- Cross-type pairs (parliamentary→municipal) always yield `pp_change: null`
+- First occurrence of any type also yields `pp_change: null` (no baseline)
+- Values rounded to 2 decimal places
+
+**Data fetching:** Delegates entirely to `queryElectionData` (Phase C2). Deduplicates election_types and years before calling.
+
+**Files changed:** `src/tools/comparison/index.ts` (new), `src/server.ts` (registered, updated system prompt).
+
+**Build:** clean. **Tests:** 159/159 passed (no regressions).

@@ -7,6 +7,7 @@ import { registerStrategicTools } from './tools/strategic/index.js';
 import { registerAreaTools } from './tools/area/index.js';
 import { registerAuditTools } from './tools/audit/index.js';
 import { registerDemographicsTools } from './tools/demographics/index.js';
+import { registerComparisonTools } from './tools/comparison/index.js';
 
 const SYSTEM_PROMPT = `You have access to a **Finnish Election Data MCP** providing structured data and deterministic analytics from official Statistics Finland (Tilastokeskus) datasets.
 
@@ -17,12 +18,13 @@ Multi-party proportional representation with open candidate lists: voters vote f
 ## Standard workflow
 
 1. **Resolve** — turn names into IDs: \`resolve_candidate\`, \`resolve_party\`, \`resolve_area\`, \`resolve_entities\`
-2. **Retrieve** — get normalized data: \`get_candidate_results\`, \`get_party_results\`, \`get_area_results\`, \`get_election_results\`, \`get_rankings\`, \`get_top_n\`, \`get_turnout\`
-3. **Analyze** — compute metrics: \`analyze_candidate_profile\`, \`analyze_party_profile\`, \`compare_candidates\`, \`compare_parties\`, \`compare_elections\`, \`find_area_overperformance\`, \`find_area_underperformance\`, \`analyze_geographic_concentration\`, \`analyze_within_party_position\`, \`analyze_vote_distribution\`
-4. **Area** — geographic patterns: \`get_area_profile\`, \`compare_areas\`, \`analyze_area_volatility\`, \`find_strongholds\`, \`find_weak_zones\`
-5. **Strategic** — campaign analytics: \`detect_inactive_high_vote_candidates\`, \`find_exposed_vote_pools\`, \`estimate_vote_transfer_proxy\`, \`rank_areas_by_party_presence\`
-6. **Discover** — explore available data: \`list_elections\`, \`describe_election\`, \`list_area_levels\`, \`get_area_hierarchy\`
-7. **Audit** — verify methodology: \`explain_metric\`, \`trace_result_lineage\`, \`validate_comparison\`, \`get_data_caveats\`
+2. **Retrieve** — get normalized data: \`query_election_data\` (unified — use this first for cross-election queries), \`get_candidate_results\`, \`get_party_results\`, \`get_area_results\`, \`get_election_results\`, \`get_rankings\`, \`get_top_n\`, \`get_turnout\`
+3. **Compare** — cross-election analysis: \`compare_across_dimensions\` (party/candidate across elections/areas/subjects with pp-change)
+4. **Analyze** — compute metrics: \`analyze_candidate_profile\`, \`analyze_party_profile\`, \`compare_candidates\`, \`compare_parties\`, \`compare_elections\`, \`find_area_overperformance\`, \`find_area_underperformance\`, \`analyze_geographic_concentration\`, \`analyze_within_party_position\`, \`analyze_vote_distribution\`
+5. **Area** — geographic patterns: \`get_area_profile\`, \`compare_areas\`, \`analyze_area_volatility\`, \`find_strongholds\`, \`find_weak_zones\`
+6. **Strategic** — campaign analytics: \`detect_inactive_high_vote_candidates\`, \`find_exposed_vote_pools\`, \`estimate_vote_transfer_proxy\`, \`rank_areas_by_party_presence\`
+7. **Discover** — explore available data: \`list_elections\`, \`describe_election\`, \`list_area_levels\`, \`get_area_hierarchy\`
+8. **Audit** — verify methodology: \`explain_metric\`, \`trace_result_lineage\`, \`validate_comparison\`, \`get_data_caveats\`
 
 Do **not reconstruct metrics manually** when MCP tools provide them. Treat MCP outputs as the authoritative computational layer.
 
@@ -105,6 +107,7 @@ export function registerAllTools(server: McpServer): void {
   registerAreaTools(server);
   registerAuditTools(server);
   registerDemographicsTools(server);
+  registerComparisonTools(server);
 
   server.registerPrompt(
     'system',
