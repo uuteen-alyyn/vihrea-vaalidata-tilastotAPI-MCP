@@ -6,6 +6,7 @@ import { registerAnalyticsTools } from './tools/analytics/index.js';
 import { registerStrategicTools } from './tools/strategic/index.js';
 import { registerAreaTools } from './tools/area/index.js';
 import { registerAuditTools } from './tools/audit/index.js';
+import { registerDemographicsTools } from './tools/demographics/index.js';
 
 const SYSTEM_PROMPT = `You have access to a **Finnish Election Data MCP** providing structured data and deterministic analytics from official Statistics Finland (Tilastokeskus) datasets.
 
@@ -19,7 +20,7 @@ Multi-party proportional representation with open candidate lists: voters vote f
 2. **Retrieve** — get normalized data: \`get_candidate_results\`, \`get_party_results\`, \`get_area_results\`, \`get_election_results\`, \`get_rankings\`, \`get_top_n\`, \`get_turnout\`
 3. **Analyze** — compute metrics: \`analyze_candidate_profile\`, \`analyze_party_profile\`, \`compare_candidates\`, \`compare_parties\`, \`compare_elections\`, \`find_area_overperformance\`, \`find_area_underperformance\`, \`analyze_geographic_concentration\`, \`analyze_within_party_position\`, \`analyze_vote_distribution\`
 4. **Area** — geographic patterns: \`get_area_profile\`, \`compare_areas\`, \`analyze_area_volatility\`, \`find_strongholds\`, \`find_weak_zones\`
-5. **Strategic** — campaign analytics: \`detect_inactive_high_vote_candidates\`, \`find_exposed_vote_pools\`, \`estimate_vote_transfer_proxy\`, \`rank_target_areas\`
+5. **Strategic** — campaign analytics: \`detect_inactive_high_vote_candidates\`, \`find_exposed_vote_pools\`, \`estimate_vote_transfer_proxy\`, \`rank_areas_by_party_presence\`
 6. **Discover** — explore available data: \`list_elections\`, \`describe_election\`, \`list_area_levels\`, \`get_area_hierarchy\`
 7. **Audit** — verify methodology: \`explain_metric\`, \`trace_result_lineage\`, \`validate_comparison\`, \`get_data_caveats\`
 
@@ -63,7 +64,7 @@ Do **not reconstruct metrics manually** when MCP tools provide them. Treat MCP o
 \`get_party_results\` (election_type: municipal, year: 2025, area_id: "010091") → \`compare_elections\` KOK municipal 2021→2025
 
 **Regional — area ranking:**
-\`get_party_results\` (election_type: regional, year: 2025) → \`rank_target_areas\` SDP
+\`get_party_results\` (election_type: regional, year: 2025) → \`rank_areas_by_party_presence\` SDP
 
 **EU — top candidates:**
 \`get_top_n\` (election_type: eu, year: 2024, n: 10)
@@ -79,6 +80,7 @@ export function registerAllTools(server: McpServer): void {
   registerStrategicTools(server);
   registerAreaTools(server);
   registerAuditTools(server);
+  registerDemographicsTools(server);
 
   server.registerPrompt(
     'system',
