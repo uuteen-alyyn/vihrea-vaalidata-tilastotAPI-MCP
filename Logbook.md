@@ -1069,3 +1069,28 @@ Extracted code that was private to `entity-resolution/index.ts` into two shared 
 **`entity-resolution/index.ts`:** Updated imports to pull from the new shared modules; removed all private duplicate implementations. The file retains its own private `fetchMetadataCached` (needed only for `getAreaList` which has not been moved yet).
 
 **Build:** clean. **Tests:** 159/159 passed (no regressions).
+
+---
+
+## PHASE C5: scrape_candidate_trajectory — 2026-03-19 00:41:00
+
+Added `scrape_candidate_trajectory` tool to `src/tools/comparison/index.ts`. Registered in system prompt.
+
+**Purpose:** Given a candidate name (or ID) and a list of election types, finds all elections where that candidate appeared and returns a timeline of their results.
+
+**Key design decisions:**
+- `election_types` is required with no "search all" shortcut — searching all types × years without a filter triggers 100+ API calls (parliamentary: 5 years × 13 vaalipiiri fan-out = 65 calls)
+- Cross-election identity via fuzzy name matching (Dice-coefficient bigram, shared `scoreMatchFast`). Candidate IDs are reissued each election so ID-based cross-election lookup is not possible.
+- score ≥ 0.95 → confirmed, included in trajectory. score 0.55–0.95 → ambiguous, returned with flag for LLM review. < 0.55 → not found.
+- `include_party_context: true` fetches party results for same areas/elections (extra call per confirmed election)
+- All candidate loading and result fetching runs in parallel via `Promise.all`
+- Uses `getCandidatesAllUnits` (from Phase shared-utils refactor) for candidate lookup per (election_type, year)
+- Uses `queryElectionData` (Phase C2) for result fetching
+
+**Parameters:** `query` (name or candidate_id), `election_types` (required array), `years?` (filter), `area_level` (required), `include_party_context?` (default false)
+
+**Output:** `trajectory[]` (confirmed matches with results), `not_found[]`, `ambiguous_matches[]`, `load_errors[]`, `method` (methodology note)
+
+**Files changed:** `src/tools/comparison/index.ts` (added CANDIDATE_YEARS_BY_TYPE constant and tool registration), `src/server.ts` (system prompt updated).
+
+**Build:** clean. **Tests:** 159/159 passed (no regressions).

@@ -1,14 +1,28 @@
 /**
- * Comparison tools — Phase C3
+ * Comparison tools — Phase C3 + C5
  *
  * compare_across_dimensions: cross-election/cross-area/cross-subject comparisons
  *   with pp-change computation between same-type elections.
+ *
+ * scrape_candidate_trajectory: cross-election candidate tracking via fuzzy name matching.
  */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { queryElectionData } from '../../data/query-engine.js';
+import { getCandidatesAllUnits, type CandidateEntry } from '../../data/candidate-index.js';
+import { normalizeStr, buildBigrams, scoreMatchFast, confidenceLabel } from '../../utils/fuzzy-match.js';
 import type { ElectionRecord, ElectionType, AreaLevel } from '../../data/types.js';
+
+// ─── Candidate years with data ─────────────────────────────────────────────────
+
+const CANDIDATE_YEARS_BY_TYPE: Record<ElectionType, number[]> = {
+  parliamentary:  [2007, 2011, 2015, 2019, 2023],
+  municipal:      [2021, 2025],
+  regional:       [2025],
+  eu_parliament:  [2019, 2024],
+  presidential:   [2024],
+};
 
 // ─── PP-change helper ─────────────────────────────────────────────────────────
 
@@ -277,6 +291,262 @@ export function registerComparisonTools(server: McpServer): void {
 
         return {
           content: [{ type: 'text' as const, text: JSON.stringify(tableData, null, 2) }],
+        };
+
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return { content: [{ type: 'text' as const, text: JSON.stringify({ error: msg }) }] };
+      }
+    }
+  );
+
+  // ── scrape_candidate_trajectory ────────────────────────────────────────────
+  server.tool(
+    'scrape_candidate_trajectory',
+    'Find all elections a candidate has appeared in and return their results as a timeline. ' +
+    'Uses fuzzy name matching across election-specific candidate tables — candidate IDs are reissued ' +
+    'each election so cross-election identity relies on name matching. ' +
+    '\n\nREQUIRED: election_types must be specified — no "search all" shortcut. ' +
+    'Searching all types and years without a filter triggers 100+ API calls (parliamentary alone: ' +
+    '5 years × 13 vaalipiiri fan-out = 65 calls). Specify only the types the candidate is known to ' +
+    'have participated in. ' +
+    '\n\nMatching rules: score ≥ 0.95 = confirmed (included automatically). ' +
+    'score 0.55–0.95 = ambiguous (returned with flag for LLM review, not included in results). ' +
+    'score < 0.55 = not found.',
+    {
+      query: z.string().describe(
+        'Candidate name to search for (fuzzy matched). ' +
+        'Use the Finnish name format: "Harjanne Atte" or "Atte Harjanne" both work. ' +
+        'Or pass a candidate_id (numeric string) for exact lookup.'
+      ),
+      election_types: z.array(
+        z.enum(['parliamentary', 'municipal', 'eu_parliament', 'presidential', 'regional'])
+      ).min(1).describe(
+        'Election types to search. Required — must be specified explicitly. ' +
+        'Example: ["parliamentary", "eu_parliament"] to search parl and EU candidate tables. ' +
+        'Available candidate data: parliamentary 2007/2011/2015/2019/2023, ' +
+        'municipal 2021/2025, regional 2025, eu_parliament 2019/2024, presidential 2024.'
+      ),
+      years: z.array(z.number()).optional().describe(
+        'Optional year filter. If omitted, searches all years with candidate data for each type. ' +
+        'Example: [2023, 2024] to limit to recent elections only.'
+      ),
+      area_level: z.enum(['koko_suomi', 'vaalipiiri', 'kunta', 'aanestysalue', 'hyvinvointialue']).describe(
+        'Geographic level to return results at. ' +
+        'vaalipiiri is the most useful for parliamentary/municipal trajectory analysis. ' +
+        'koko_suomi for national totals only (presidential/EU). Required.'
+      ),
+      include_party_context: z.boolean().optional().describe(
+        'If true, also include how the candidate\'s party performed in the same areas and elections. ' +
+        'Adds one extra queryElectionData call per confirmed election. Default: false.'
+      ),
+    },
+    async ({ query, election_types, years, area_level, include_party_context }) => {
+      try {
+        // Pre-compute query normalizations for fast matching
+        const qLow = query.toLowerCase().trim();
+        const qNorm = normalizeStr(query);
+        const qBigrams = buildBigrams(qNorm);
+        const isIdQuery = /^\d+$/.test(query.trim());
+
+        // Build list of (election_type, year) combos to search
+        const combos: Array<{ election_type: ElectionType; year: number }> = [];
+        for (const elType of election_types) {
+          const defaultYears = CANDIDATE_YEARS_BY_TYPE[elType];
+          const targetYears = years
+            ? years.filter((y) => defaultYears.includes(y))
+            : defaultYears;
+          for (const year of targetYears) {
+            combos.push({ election_type: elType as ElectionType, year });
+          }
+        }
+
+        if (combos.length === 0) {
+          return {
+            content: [{ type: 'text' as const, text: JSON.stringify({
+              error: 'No valid (election_type, year) combinations. ' +
+                     'Check that the years filter overlaps with years that have candidate data.',
+            }) }],
+          };
+        }
+
+        // Step 1: Load candidate lists and fuzzy match — all combos in parallel
+        type MatchResult = {
+          election_type: ElectionType;
+          year: number;
+          confirmed: CandidateEntry[];           // score >= 0.95
+          ambiguous: Array<{ entry: CandidateEntry; score: number }>; // 0.55–0.95
+          load_error?: string;
+        };
+
+        const matchResults: MatchResult[] = await Promise.all(
+          combos.map(async ({ election_type, year }) => {
+            try {
+              const candidates = await getCandidatesAllUnits(year, election_type);
+              const confirmed: CandidateEntry[] = [];
+              const ambiguous: Array<{ entry: CandidateEntry; score: number }> = [];
+
+              for (const c of candidates) {
+                let score: number;
+                if (isIdQuery) {
+                  // Exact ID match
+                  score = c.candidate_id === query.trim() ? 1.0 : 0;
+                } else {
+                  const cLow = c.candidate_name.toLowerCase().trim();
+                  const cNorm = normalizeStr(c.candidate_name);
+                  score = scoreMatchFast(qLow, qNorm, qBigrams, cLow, cNorm);
+                }
+
+                if (score >= 0.95) {
+                  confirmed.push(c);
+                } else if (score >= 0.55) {
+                  ambiguous.push({ entry: c, score });
+                }
+              }
+
+              // Keep top 3 ambiguous by score
+              ambiguous.sort((a, b) => b.score - a.score);
+              return { election_type, year, confirmed, ambiguous: ambiguous.slice(0, 3) };
+            } catch (err) {
+              return {
+                election_type,
+                year,
+                confirmed: [],
+                ambiguous: [],
+                load_error: err instanceof Error ? err.message : String(err),
+              };
+            }
+          })
+        );
+
+        // Step 2: For confirmed matches, fetch results via queryElectionData
+        // Run in parallel, one call per (election_type, year, candidate_id)
+        type TrajectoryEntry = {
+          election_type: ElectionType;
+          year: number;
+          candidate_id: string;
+          candidate_name: string;
+          party: string;
+          vaalipiiri_key: string;
+          match_confidence: 'exact' | 'high' | 'medium' | 'low';
+          results: ElectionRecord[];
+          party_context?: ElectionRecord[];
+        };
+
+        const trajectoryPromises: Array<Promise<TrajectoryEntry>> = [];
+
+        for (const mr of matchResults) {
+          for (const c of mr.confirmed) {
+            trajectoryPromises.push((async () => {
+              const resultData = await queryElectionData({
+                subject_type: 'candidate',
+                subject_ids: [c.candidate_id],
+                election_types: [mr.election_type],
+                years: [mr.year],
+                area_level: area_level as AreaLevel,
+              });
+
+              let partyCtx: ElectionRecord[] | undefined;
+              if (include_party_context && c.party) {
+                try {
+                  const partyData = await queryElectionData({
+                    subject_type: 'party',
+                    subject_ids: [c.party],
+                    election_types: [mr.election_type],
+                    years: [mr.year],
+                    area_level: area_level as AreaLevel,
+                  });
+                  partyCtx = partyData.rows;
+                } catch {
+                  // Party context is best-effort
+                }
+              }
+
+              const confidence = confidenceLabel(
+                isIdQuery ? 1.0
+                  : scoreMatchFast(
+                      qLow, qNorm, qBigrams,
+                      c.candidate_name.toLowerCase().trim(),
+                      normalizeStr(c.candidate_name)
+                    )
+              );
+
+              return {
+                election_type: mr.election_type,
+                year: mr.year,
+                candidate_id: c.candidate_id,
+                candidate_name: c.candidate_name,
+                party: c.party,
+                vaalipiiri_key: c.vaalipiiri_key,
+                match_confidence: confidence,
+                results: resultData.rows,
+                ...(partyCtx ? { party_context: partyCtx } : {}),
+              };
+            })());
+          }
+        }
+
+        const trajectoryEntries = await Promise.all(trajectoryPromises);
+
+        // Sort timeline: election_type alphabetically then year ascending
+        trajectoryEntries.sort((a, b) => {
+          if (a.election_type !== b.election_type) return a.election_type.localeCompare(b.election_type);
+          return a.year - b.year;
+        });
+
+        // Build not-found and ambiguous summaries
+        const not_found = matchResults
+          .filter((mr) => mr.confirmed.length === 0 && mr.ambiguous.length === 0 && !mr.load_error)
+          .map(({ election_type, year }) => ({ election_type, year, reason: 'no match above threshold' }));
+
+        const load_errors = matchResults
+          .filter((mr) => mr.load_error)
+          .map(({ election_type, year, load_error }) => ({ election_type, year, error: load_error }));
+
+        const ambiguous_matches = matchResults
+          .filter((mr) => mr.confirmed.length === 0 && mr.ambiguous.length > 0)
+          .map(({ election_type, year, ambiguous }) => ({
+            election_type,
+            year,
+            candidates: ambiguous.map((a) => ({
+              candidate_id: a.entry.candidate_id,
+              candidate_name: a.entry.candidate_name,
+              party: a.entry.party,
+              vaalipiiri_key: a.entry.vaalipiiri_key,
+              match_score: Math.round(a.score * 100) / 100,
+              match_confidence: confidenceLabel(a.score),
+            })),
+          }));
+
+        const output = {
+          query,
+          elections_searched: combos.length,
+          elections_found: trajectoryEntries.length,
+          area_level,
+          trajectory: trajectoryEntries.map((t) => ({
+            election_type: t.election_type,
+            year: t.year,
+            candidate_id: t.candidate_id,
+            candidate_name: t.candidate_name,
+            party: t.party,
+            vaalipiiri_key: t.vaalipiiri_key,
+            match_confidence: t.match_confidence,
+            results: t.results,
+            ...(t.party_context ? { party_context: t.party_context } : {}),
+          })),
+          ...(not_found.length > 0 ? { not_found } : {}),
+          ...(ambiguous_matches.length > 0 ? { ambiguous_matches } : {}),
+          ...(load_errors.length > 0 ? { load_errors } : {}),
+          method: {
+            matching: 'Dice-coefficient bigram similarity on normalized names. ' +
+                      'score ≥ 0.95 = confirmed; 0.55–0.95 = ambiguous (not included in trajectory); < 0.55 = not found.',
+            identity: 'Candidate IDs are reissued each election — cross-election identity via name match only.',
+            rate_limit_note: 'Parliamentary searches fan out to 13 vaalipiiri tables per year (cached after first call).',
+          },
+        };
+
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(output, null, 2) }],
         };
 
       } catch (err: unknown) {
