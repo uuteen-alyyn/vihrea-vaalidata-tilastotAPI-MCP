@@ -86,6 +86,27 @@ export interface ElectionTableSet {
   geographic_unit_type?: 'vaalipiiri' | 'hyvinvointialue' | 'national';
   /** Results analysis / comparison to prior election */
   results_analysis?: string;
+
+  /**
+   * Background characteristics of eligible voters, candidates & elected.
+   * Multi-year table — registered on the most recent entry only.
+   * All background dimensions (employment, education, employer_sector,
+   * income_decile, language, origin) live in a single PxWeb variable
+   * (Taustamuuttujat). Loaded via findVoterBackgroundTableForType()
+   * fallback for older years, mirroring the findPartyTableForType() pattern.
+   */
+  voter_background?: string;
+
+  /**
+   * Turnout by demographic dimension — keyed by dimension name.
+   * Only present on the single election entry where this data exists.
+   * age_group uses near-individual-age tables (13ys, 152q, 14ha, 14nk)
+   * that require aggregation to standard 7 groups in the normalizer.
+   */
+  voter_turnout_by_demographics?: Partial<Record<
+    'age_group' | 'education' | 'income_quintile' | 'origin_language' | 'activity',
+    string
+  >>;
 }
 
 // ─── Party schemas ─────────────────────────────────────────────────────────────
@@ -173,6 +194,14 @@ export const PARLIAMENTARY_TABLES: ElectionTableSet[] = [
       'ahvenanmaa':     'statfin_evaa_pxt_13ti',
     },
     results_analysis: 'statfin_evaa_pxt_13yh',
+    voter_background: 'statfin_evaa_pxt_13su',          // 2011–2023, multi-year
+    voter_turnout_by_demographics: {
+      age_group:       'statfin_evaa_pxt_13ys',          // 18/19 + 5-yr bins → aggregate to 7 groups
+      education:       'statfin_evaa_pxt_13yt',
+      origin_language: 'statfin_evaa_pxt_13yu',
+      income_quintile: 'statfin_evaa_pxt_13yv',
+      activity:        'statfin_evaa_pxt_13yw',
+    },
   },
   {
     election_type: 'parliamentary',
@@ -307,6 +336,14 @@ export const MUNICIPAL_TABLES: ElectionTableSet[] = [
       'lappi':          'statfin_kvaa_pxt_14vk',
     },
     results_analysis: 'statfin_kvaa_pxt_14yb',
+    voter_background: 'statfin_kvaa_pxt_14w4',          // 2012–2025, multi-year
+    voter_turnout_by_demographics: {
+      age_group:       'statfin_kvaa_pxt_152q',          // Alue=SSS → Manner-Suomi
+      education:       'statfin_kvaa_pxt_152r',
+      origin_language: 'statfin_kvaa_pxt_152s',
+      income_quintile: 'statfin_kvaa_pxt_152t',
+      activity:        'statfin_kvaa_pxt_152u',
+    },
   },
   {
     election_type: 'municipal',
@@ -391,6 +428,13 @@ export const EU_TABLES: ElectionTableSet[] = [
     party_schema:      EU_PARTY_SCHEMA,
     candidate_national: 'statfin_euvaa_pxt_14gy',   // all candidates, national totals only
     geographic_unit_type: 'national',
+    voter_turnout_by_demographics: {
+      age_group:       'statfin_euvaa_pxt_14ha',
+      education:       'statfin_euvaa_pxt_14hb',
+      origin_language: 'statfin_euvaa_pxt_14hc',
+      income_quintile: 'statfin_euvaa_pxt_14hd',
+      activity:        'statfin_euvaa_pxt_14he',
+    },
   },
   {
     election_type: 'eu_parliament',
@@ -415,6 +459,13 @@ export const PRESIDENTIAL_TABLES: ElectionTableSet[] = [
     candidate_national: 'statfin_pvaa_pxt_14d5',
     geographic_unit_type: 'national',
     turnout_by_aanestysalue: 'statfin_pvaa_pxt_14d6',
+    voter_turnout_by_demographics: {
+      age_group:       'statfin_pvaa_pxt_14nk',     // has Kierros var — loader filters to round 1
+      education:       'statfin_pvaa_pxt_14nl',
+      origin_language: 'statfin_pvaa_pxt_14nm',
+      income_quintile: 'statfin_pvaa_pxt_14nn',
+      activity:        'statfin_pvaa_pxt_14np',
+    },
   },
 ];
 
@@ -446,6 +497,20 @@ export function findPartyTableForType(
 ): ElectionTableSet | undefined {
   return ALL_ELECTION_TABLES.find(
     (t) => t.election_type === type && t.party_by_kunta
+  );
+}
+
+/**
+ * Find the entry for an election type that has a voter_background table.
+ * Used as fallback for older years — the multi-year table (13su / 14w4)
+ * is registered only on the most recent entry and covers all years via
+ * server-side Vuosi filtering in the loader.
+ */
+export function findVoterBackgroundTableForType(
+  type: ElectionType
+): ElectionTableSet | undefined {
+  return ALL_ELECTION_TABLES.find(
+    (t) => t.election_type === type && t.voter_background
   );
 }
 
