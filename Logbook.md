@@ -1155,3 +1155,18 @@ The `vp_prefix` case had a bug — it returned `kunta` for all non-VP/non-3digit
 
 **Files changed:** `src/data/normalizer.ts`, `src/data/election-tables.ts`.
 **Build:** clean. **Tests:** 159/159 passed (no regressions).
+
+## B3: resolve_area — hyvinvointialue support — 2026-03-19 01:14:30
+
+Extended `resolve_area` and `resolve_entities` to resolve hyvinvointialue names.
+
+**Changes:**
+- `src/tools/entity-resolution/index.ts`:
+  - `AreaEntry.area_level` union extended with `'hyvinvointialue'`.
+  - New `getHyvinvointialueList(year = 2025)` function: fetches metadata from `statfin_alvaa_pxt_14y4` (regional `party_by_kunta`), reads `Alue` variable, filters to codes matching `/^\d{6}$/` ending in `0000` (the `aggregate_area_level` pattern for `six_digit` format), returns entries with `area_level: 'hyvinvointialue'`.
+  - `resolve_area` schema: `area_level` enum extended to include `'hyvinvointialue'`. When requested, loads from `getHyvinvointialueList()` instead of `getAreaList()`; defaults to year 2025 when year=2023 (the parliamentary default) is passed.
+  - `resolve_entities` schema: same enum extension. Handler delegates to `getHyvinvointialueList()` when `area_level === 'hyvinvointialue'`.
+
+**Usage:** `resolve_area("Pirkanmaa", area_level: "hyvinvointialue")` → `{ area_id: '...', area_name: 'Pirkanmaan hyvinvointialue', area_level: 'hyvinvointialue' }`.
+
+**Build:** clean. **Tests:** 159/159 passed.

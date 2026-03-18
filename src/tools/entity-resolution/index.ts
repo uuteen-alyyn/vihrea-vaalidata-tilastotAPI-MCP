@@ -163,7 +163,7 @@ const SWEDISH_TO_FINNISH_AREA: Record<string, string> = {
 interface AreaEntry {
   area_id: string;
   area_name: string;
-  area_level: 'koko_suomi' | 'vaalipiiri' | 'kunta';
+  area_level: 'koko_suomi' | 'vaalipiiri' | 'kunta' | 'hyvinvointialue';
 }
 
 async function getAreaList(year = 2023): Promise<AreaEntry[]> {
@@ -181,6 +181,20 @@ async function getAreaList(year = 2023): Promise<AreaEntry[]> {
     else area_level = 'kunta';
     return { area_id: code, area_name: areaVar.valueTexts[i] ?? code, area_level };
   });
+}
+
+async function getHyvinvointialueList(year = 2025): Promise<AreaEntry[]> {
+  const tables = getElectionTables('regional', year);
+  if (!tables?.party_by_kunta) throw new Error(`No regional party table for ${year}`);
+  const dbPath = getDatabasePath(tables);
+  const metadata = await fetchMetadataCached(dbPath, tables.party_by_kunta);
+  const areaVar = metadata.variables.find((v) => v.code === 'Alue');
+  if (!areaVar) throw new Error('Area variable not found in 14y4 metadata');
+
+  return areaVar.values
+    .map((code, i) => ({ code, name: areaVar.valueTexts[i] ?? code }))
+    .filter(({ code }) => /^\d{6}$/.test(code) && code.endsWith('0000'))
+    .map(({ code, name }) => ({ area_id: code, area_name: name, area_level: 'hyvinvointialue' as const }));
 }
 
 // ─── Tool registration ────────────────────────────────────────────────────────
@@ -311,16 +325,20 @@ export function registerEntityResolutionTools(server: McpServer): void {
   // ── resolve_area ──────────────────────────────────────────────────────────
   server.tool(
     'resolve_area',
-    'Resolves a fuzzy municipality, vaalipiiri, or area name to a canonical area_id usable in other tools. Handles Finnish and Swedish name forms, spelling variations, and partial names. Returns the area_id in the format used by get_party_results, get_area_results, and related tools.',
+    'Resolves a fuzzy municipality, vaalipiiri, hyvinvointialue, or area name to a canonical area_id usable in other tools. Handles Finnish and Swedish name forms, spelling variations, and partial names. Returns the area_id in the format used by get_party_results, get_area_results, and related tools.',
     {
-      query: z.string().max(200).describe('Area name to resolve (e.g. "Helsinki", "Helsingfors", "Hki", "Pirkanmaa vaalipiiri", "Tampere", "Uusimaa").'),
-      area_level: z.enum(['kunta', 'vaalipiiri', 'koko_suomi']).optional().describe('Restrict results to a specific area level. Omit to search all levels.'),
-      year: z.number().optional().describe('Election year for area metadata. Defaults to 2023.'),
+      query: z.string().max(200).describe('Area name to resolve (e.g. "Helsinki", "Helsingfors", "Hki", "Pirkanmaa vaalipiiri", "Tampere", "Uusimaa", "Pirkanmaan hyvinvointialue").'),
+      area_level: z.enum(['kunta', 'vaalipiiri', 'koko_suomi', 'hyvinvointialue']).optional().describe('Restrict results to a specific area level. Omit to search all levels (kunta/vaalipiiri/koko_suomi). Use "hyvinvointialue" for regional election areas.'),
+      year: z.number().optional().describe('Election year for area metadata. Defaults to 2023 (parliamentary). Use 2025 for hyvinvointialue.'),
     },
     async ({ query, area_level, year = 2023 }) => {
       let areas: AreaEntry[];
       try {
-        areas = await getAreaList(year);
+        if (area_level === 'hyvinvointialue') {
+          areas = await getHyvinvointialueList(year === 2023 ? 2025 : year);
+        } else {
+          areas = await getAreaList(year);
+        }
       } catch (err) {
         return {
           content: [{
@@ -507,7 +525,7 @@ export function registerEntityResolutionTools(server: McpServer): void {
         election_type: z.enum(['parliamentary', 'municipal', 'eu_parliament', 'presidential', 'regional']).optional().describe('For candidates: election type. Defaults to parliamentary.'),
         unit_key: z.string().optional().describe('For candidates: vaalipiiri or hyvinvointialue key to limit search scope.'),
         party: z.string().optional().describe('For candidates: party abbreviation to narrow results.'),
-        area_level: z.enum(['kunta', 'vaalipiiri', 'koko_suomi']).optional().describe('For areas: restrict to area level.'),
+        area_level: z.enum(['kunta', 'vaalipiiri', 'koko_suomi', 'hyvinvointialue']).optional().describe('For areas: restrict to area level.'),
       })).describe('List of entities to resolve. Maximum 20 per call.'),
     },
     async ({ entities }) => {
@@ -556,7 +574,9 @@ export function registerEntityResolutionTools(server: McpServer): void {
 
         } else if (entity.entity_type === 'area') {
           try {
-            const areas = await getAreaList(year);
+            const areas = entity.area_level === 'hyvinvointialue'
+              ? await getHyvinvointialueList(year === 2023 ? 2025 : year)
+              : await getAreaList(year);
             const candidates = entity.area_level ? areas.filter((a) => a.area_level === entity.area_level) : areas;
             const eqLow = entity.query.toLowerCase().trim();
             const eqFi = SWEDISH_TO_FINNISH_AREA[eqLow] ?? eqLow;
