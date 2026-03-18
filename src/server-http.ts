@@ -25,6 +25,15 @@ if (isNaN(rawPort) || rawPort < 1024 || rawPort > 65535) {
 const PORT = (!isNaN(rawPort) && rawPort >= 1024 && rawPort <= 65535) ? rawPort : 3000;
 
 // ─── Per-IP rate limiter ──────────────────────────────────────────────────────
+//
+// NEW-SEC-8: Multi-instance limitation.
+// This in-process rate limiter is per-instance. If multiple Node.js processes
+// run behind a load balancer (e.g. Azure App Service with multiple workers),
+// each process maintains its own ipTimestamps Map, so the effective limit is
+// RATE_LIMIT_REQUESTS × number-of-instances. For true global rate limiting
+// across instances, replace this with a shared Redis counter (e.g. rate-limiter-
+// flexible with ioredis). Until then, keep instance count to 1 for enforcement
+// guarantees, or accept the per-instance semantics as a best-effort safeguard.
 
 const RATE_LIMIT_REQUESTS  = parseInt(process.env.RATE_LIMIT_REQUESTS  ?? '30', 10);
 const RATE_LIMIT_WINDOW_MS = parseInt(process.env.RATE_LIMIT_WINDOW_MS ?? '60000', 10);
@@ -129,9 +138,29 @@ const httpServer = http.createServer((req, res) => {
   const start    = Date.now();
   const clientIp = getClientIp(req);
 
+  // NEW-SEC-7: Structured access logging — capture tool name and sanitized args
+  // from MCP JSON body. We listen on 'data' alongside the transport; Node.js
+  // EventEmitter broadcasts to all listeners, so both collectors see every chunk.
+  let toolName = '';
+  let toolArgsSummary = '';
+  const bodyChunks: Buffer[] = [];
+  req.on('data', (chunk: Buffer) => bodyChunks.push(chunk));
+  req.on('end', () => {
+    try {
+      const parsed = JSON.parse(Buffer.concat(bodyChunks).toString('utf8')) as Record<string, unknown>;
+      const params = parsed['params'] as Record<string, unknown> | undefined;
+      if (parsed['method'] === 'tools/call' && typeof params?.['name'] === 'string') {
+        toolName = sanitizeForLog(params['name']);
+        const args = params['arguments'];
+        toolArgsSummary = sanitizeForLog(JSON.stringify(args ?? {}));
+      }
+    } catch { /* not JSON or not a tool call — omit from log */ }
+  });
+
   res.on('finish', () => {
     const duration = Date.now() - start;
-    console.log(`${new Date().toISOString()} ${req.method} ${req.url} ${res.statusCode} ${duration}ms ip=${clientIp}`);
+    const toolPart = toolName ? ` tool=${toolName} args=${toolArgsSummary}` : '';
+    console.log(`${new Date().toISOString()} ${req.method} ${req.url} ${res.statusCode} ${duration}ms ip=${clientIp}${toolPart}`);
   });
 
   // Set security headers on all responses we control. The transport-handled

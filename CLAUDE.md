@@ -13,6 +13,8 @@ The service is designed to be consumed by LLM-based analyst systems, research to
 Per project good practices (`CLAUDE CODE_GOOD PRACTICES.md`), always maintain:
 
 - **Implementation_plan.md** — Step-by-step plan split into phases, each with goals and tests (create before coding)
+- **BACKLOG.md** — Persistent work queue. Check at the start of every session and surface any outstanding items. Add items whenever the user requests work. Remove items only when the user explicitly says the task is done or dropped.
+- **Logbook.md** — Logbook is always priority 1. Write the logbook entry before anything else when completing a phase or significant work unit.
 - **Logbook.md** — Append-only activity log. New entries go at the **bottom only**. Never remove existing entries. Each entry format:
   ```
   ## ENTRY DESCRIPTIVE TITLE YYYY-MM-DD HH:MM:SS
@@ -80,9 +82,44 @@ Finnish elections use multi-party proportional representation with open candidat
 
 ## Commands
 
-> No build/test infrastructure exists yet. This section will be updated as the project is implemented.
+```bash
+npm run build   # TypeScript compile — must pass before any commit
+npm test        # Vitest test suite (src/**/*.test.ts)
+```
+
+## Git & GitHub Workflow
+
+**Commit after every completed phase or significant self-contained change.** Do not accumulate multiple phases in one commit.
+
+### When to commit
+- After each phase is complete and tests pass
+- After any standalone bug fix with a passing test
+- After documentation-only changes (logbook, implementation plan, CLAUDE.md)
+- Before switching to a different task area
+
+### Commit checklist (always run before committing)
+1. `npm run build` — must exit 0
+2. `npm test` — all tests must pass; include count in logbook
+3. Stage specific files (never `git add .` blindly — avoid committing `.env`, `cache-store.json`, secrets)
+4. Write a concise commit message: `Phase N: <what changed>` or `fix: <what and why>`
+
+### Push cadence
+- Push to GitHub (`git push`) after every commit, or at minimum at the end of every working session.
+- The remote is the source of truth. Never let local diverge from remote by more than one session.
+- GitHub token is documented in the memory file `reference_github.md`.
+
+### Never commit
+- `cache-store.json` (runtime cache — already in `.gitignore`)
+- `.env` files or any file containing tokens/credentials
+- `node_modules/`
+
+## Deployment Notes
+
+- **Rate limiter is per-process.** The in-process sliding-window rate limiter in `server-http.ts` counts requests per IP within each Node.js instance. In a multi-instance deployment (e.g. Azure App Service with multiple workers), the effective limit is `RATE_LIMIT_REQUESTS × instance-count`. For global enforcement across instances, swap in a Redis-backed counter (see NEW-SEC-8 comment in `server-http.ts`). Until then, keep instance count = 1.
 
 ## Development Notes
 
 - Full tool specifications and output schemas are defined in [PRD.md](PRD.md)
 - Each tool should support two output modes: **data mode** (normalized rows) and **analysis mode** (deterministic summary with tables and methodology)
+- Strategic tool name: `rank_areas_by_party_presence` (renamed from `rank_target_areas` in Phase 19)
+- Breaking output field renames since Phase 19: `share_of_party_vote` → `share_of_party_vote_pct`, `top1_share` → `top1_share_pct` (etc.), `total_orphaned_votes` → `total_votes_from_inactive_candidates`

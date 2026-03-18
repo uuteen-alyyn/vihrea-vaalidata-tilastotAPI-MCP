@@ -532,3 +532,207 @@ Added `compare_across_elections` tool to `src/tools/analytics/index.ts`.
 - loadPartyResults called with 'SSS' (national aggregate) for each election
 
 **Build + test:** 99/99 passing
+
+---
+
+## PHASE 19 COMPLETE: MATH_AUDIT + POL-1/2/3 FIXES — 2026-03-18 12:00:00
+
+Fixed all 10 bugs documented in `audits/MATH_AUDIT.md` plus three political science framing issues (POL-1/2/3) from `audits/POLSCI_AUDIT_2026-03.md`. Rewrote regression tests in `src/bugs.regression.test.ts` to assert correct post-fix behavior (previously they documented the buggy behavior).
+
+**Bugs fixed:**
+
+- **BUG-1** (`analytics/index.ts`): `share_of_party_vote` returned ratio (0–1). Fixed: `pct(votes / partyTotal * 100)`. Field renamed `share_of_party_vote_pct`.
+- **BUG-2** (`retrieval/index.ts`): `buildPartyAnalysis` double-counted by summing kunta + vaalipiiri rows. Fixed: filter to `area_level !== 'kunta'` only.
+- **BUG-3** (`strategic/index.ts`): `total_estimated_lost_votes` could be negative (votes can rise while share falls). Replaced with `net_vote_count_change_in_exposed_areas` and `total_share_points_lost_in_exposed_areas`.
+- **BUG-4** (`strategic/index.ts`): c1 and c4 in composite score were mathematically identical (`c4 = 1 − c1`). Removed c4; redistributed weights to 0.40/0.35/0.25 (3-component model).
+- **BUG-5** (`analytics/index.ts`): `concentrationMetrics()` returned fractions. Fixed via `pct()`. Fields renamed with `_pct` suffix.
+- **BUG-6** (`analytics/index.ts`): Silent partial total when vaalipiiri aggregate row missing. Added `data_warning` field on fallback.
+- **BUG-7** (`area/index.ts`): Pedersen index inflated by party splits/mergers (SMP→PS, Sini 2017). Added `pedersen_method_note` to both volatility tools.
+- **BUG-8** (`strategic/index.ts`): Co-movement `consistent_with_transfer` triggered on 1-vote changes. Added `MIN_TRANSFER_VOTES=50` constant + 10% gainer ratio requirement.
+- **BUG-9** (`strategic/index.ts`): `allVotesByArea` was computed but not wired into `c3_size`. Fixed: c3 now uses total electorate size (all parties), not party vote volume.
+- **BUG-10** (`strategic/index.ts`): Diacritic normalization (ä→a) caused silent false name collisions. Added collision detection emitting `name_normalization_warning`.
+
+**Framing issues fixed:**
+
+- **POL-1** (`strategic/index.ts`): `estimate_vote_transfer_proxy` — `pct_consistent` invites ecological fallacy over-interpretation. Added `pct_consistent_caution` field + updated interpretation array.
+- **POL-2** (`strategic/index.ts`): `detect_inactive_high_vote_candidates` — "orphaned votes" implies 100% personal vote transferability. Renamed `total_orphaned_votes` → `total_votes_from_inactive_candidates`; `strategic_note` rewritten to frame as upper-bound estimate.
+- **POL-3** (`strategic/index.ts`): `find_exposed_vote_pools` — "persuadable" conflates demobilisation vs. persuasion loss. `strategic_note` rewritten to distinguish both mechanisms.
+- **POL-4** (`strategic/index.ts`, `server.ts`): Tool renamed `rank_target_areas` → `rank_areas_by_party_presence`. Description rewritten as GOTV/consolidation tool. Added `methodology_warning` to `scoring_methodology` output.
+
+**Cross-cutting changes:**
+
+- `audit/index.ts`: Updated metric registry — `share_of_party_vote` → `share_of_party_vote_pct`, 3-component composite formula, `rank_target_areas` → `rank_areas_by_party_presence`, removed now-resolved BUG-1/BUG-2 caveats.
+- `server.ts`: Tool name + worked example updated.
+- `src/bugs.regression.test.ts`: Full rewrite — all tests now assert correct fixed behavior. Tests added for BUG-4 (3-component model, weights sum to 1.0, c1/c2 independence), BUG-5 (`_pct` naming), BUG-8 (boundary cases), BUG-10 (collision detection).
+- `Implementation_plan.md`: Phase 19 plan written before implementation (13 steps with code snippets).
+
+**Breaking output field changes (consumers must update):**
+- `share_of_party_vote` → `share_of_party_vote_pct` (now a percentage, was ratio)
+- `total_estimated_lost_votes` → `net_vote_count_change_in_exposed_areas` + `total_share_points_lost_in_exposed_areas`
+- `top1_share` / `top3_share` / `top5_share` / `top10_share` → `top1_share_pct` etc. (now percentages)
+- `total_orphaned_votes` → `total_votes_from_inactive_candidates`
+
+**Build + test:** 96/96 passing (up from 91; 5 new regression tests added)
+
+---
+
+## SESSION: BACKLOG + IMPLEMENTATION PLAN OVERHAUL — 2026-03-18 13:30:00
+
+Session started by re-reading the full JSONL conversation transcript (`d4945b88-...jsonl`) to find tasks that had been lost during context compression.
+
+**Findings from transcript audit:**
+- BACKLOG.md (created at end of previous session) was missing 18 items from the security, PolSci, and code audit findings
+- Phase 19 logbook entry was missing despite Phase 19 being fully complete — written first per logbook-priority-1 rule
+- Implementation_plan.md had Phase 19 still marked as `⬜ PLANNED` — corrected to `✅ COMPLETE`
+
+**BACKLOG.md additions (18 new items):**
+- 2 new Critical items: POL-7 (c2 trend ±10pp scale useless for Finnish elections), POL-12 (rank_within_party has no seat-outcome caveat)
+- 8 new High items: STAT-2 (BUG-5 may be incomplete), QUAL-2 (POL-series not in get_data_caveats), NEW-SEC-7/8/9/10 (audit trail, multi-instance rate limit, CACHE_FILE path traversal, query echo prompt injection), FUNC-7 (bigram 0 for single-char), POL-8/13/14
+- 8 new Medium items: POL-6/15/16, STAT-4, EFF-2, COST-3, QUAL-6, and others
+
+**Implementation_plan.md additions:**
+- Phases 20–25 planned, each with explicit steps, code snippets, commit + push checkpoints:
+  - Phase 20: Critical security fixes (XFF, prototype pollution, body limit, security headers, cache integrity, path traversal, prompt injection)
+  - Phase 21: Critical analytics correctness (STAT-1 case sensitivity, STAT-2 BUG-5 completeness, POL-7 c2 percentile scale, POL-12 seat caveat, QUAL-2 audit caveats)
+  - Phase 22: Robustness & error handling (FUNC-5/6/7)
+  - Phase 23: PolSci framing (POL-5/6/8/9/10/11/13/14/15/16, STAT-3)
+  - Phase 24: Efficiency & infrastructure (NEW-SEC-7/8, COST-3, EFF-2 verify, QUAL-6)
+  - Phase 25: Integration tests (Phase 15 live test, Phase 16 Claude Desktop test)
+
+**CLAUDE.md additions:**
+- Commands section updated with `npm run build` and `npm test`
+- New **Git & GitHub Workflow** section: when to commit, commit checklist, push cadence, what not to commit
+- Development Notes updated with Phase 19 breaking field renames
+
+**Decisions:**
+- EFF-2 kept in BACKLOG for verification (Phase 18 log says it was fixed, but worth confirming)
+- NEW-SEC-5 (TLS) not given its own phase — infrastructure concern, handled at reverse proxy level; noted in CLAUDE.md deployment section
+- Phases ordered by severity: security before analytics correctness before robustness before framing before efficiency
+
+**No code changed this session** — planning and documentation only.
+
+---
+
+## PHASE 20: Critical Security Fixes — 2026-03-18 11:42:00
+
+**Files changed:** `src/server-http.ts`, `src/data/normalizer.ts`, `src/cache/cache.ts`
+
+**Fixes implemented:**
+
+- **NEW-SEC-2** (`server-http.ts`): `getClientIp()` rewritten — X-Forwarded-For only trusted when socket IP is loopback or RFC-1918 (trusted proxy). Direct clients cannot spoof the header to bypass rate limiting. Added `isTrustedProxy()` helper with IPv4-mapped IPv6 support.
+
+- **NEW-SEC-1/SEC-8** (`normalizer.ts`): Added `safeFromEntries()` that filters `__proto__`, `constructor`, `prototype` keys before `Object.fromEntries`. Both `buildKeyIndex()` and `buildValueIndex()` now use it. Prevents prototype pollution if PxWeb API returns malicious keys.
+
+- **NEW-SEC-3** (`server-http.ts`): Added `Content-Length > 1 MB` check before passing to transport. Returns 413 with JSON error body.
+
+- **NEW-SEC-4** (`server-http.ts`): Added `setSecurityHeaders()` setting `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Content-Security-Policy: default-src 'none'`. Called before transport and on all error paths.
+
+- **NEW-SEC-10** (`server-http.ts`): Added `sanitizeForLog()` — strips control characters, truncates to 200 chars. Exported for use in tool catch blocks. Reduces prompt-injection surface from user input in error messages.
+
+- **NEW-SEC-9** (`cache.ts`): `CACHE_FILE` env var now validated on startup — resolved path must start with `resolve('.')`. Throws on startup if path escapes project directory.
+
+- **NEW-SEC-6** (`cache.ts`): Cache now written as `{ hash: sha256(dataJson), data: dataJson }` envelope. On load: hash is recomputed and compared; mismatch discards cache and starts fresh. Backward compatible — legacy plain-snapshot files are still accepted.
+
+**Build:** clean (0 errors). **Tests:** 96/96 passed.
+
+**Commit:** `2169614` — Phase 20: critical security fixes
+**Pushed:** yes
+
+---
+
+## PHASE 21: Analytics Correctness — 2026-03-18 11:49:00
+
+**Files changed:** `src/tools/shared.ts`, `src/tools/shared.test.ts`, `src/tools/analytics/index.ts`, `src/tools/strategic/index.ts`, `src/tools/audit/index.ts`, `src/bugs.regression.test.ts`
+
+**Fixes implemented:**
+
+- **STAT-1** (`shared.ts`): `matchesParty()` — `row.party_id === query` replaced with `row.party_id?.toLowerCase() === q`. Lowercase LLM query "kok" now matches stored "KOK". 3 new test cases added.
+
+- **STAT-2** (`analytics/index.ts`): Audited all 4 callers of `concentrationMetrics()`. All already use `_pct` field names. No code change needed — BUG-5 was fully propagated in Phase 19.
+
+- **POL-7** (`strategic/index.ts`): c2_trend now uses percentile rank within the actual distribution of vote-share changes. Pre-pass collects and sorts all `change = share - prevShare` values; each area's c2 is `(rank - 1) / (n - 1)`. Replaces `0.5 + change/20` which compressed Finnish ±1–3pp swings into 0.45–0.65 noise range.
+
+- **POL-12** (`analytics/index.ts`): Added `RANK_WITHIN_PARTY_CAVEAT` constant. Added `rank_within_party_caveat` field to `analyze_candidate_profile` and `analyze_within_party_position` outputs. Caveat text: "Intra-party ranking only. Does not indicate election outcome or seat allocation..."
+
+- **QUAL-2** (`audit/index.ts`): Added 4 new entries to `CAVEATS` registry:
+  - `rank_within_party_no_seat_data` (critical) — no seat data in MCP
+  - `c2_trend_percentile_scale` (moderate) — relative distribution, not absolute
+  - `pedersen_period_length` (moderate) — not normalized for inter-election gap
+  - `compare_across_elections_eu_second_order` (moderate) — EU turnout + second-order effects
+
+**Build:** clean. **Tests:** 97/97 passed (+1 new test vs Phase 20).
+
+**Commit:** `b7e5fd1` — Phase 21: analytics correctness
+**Pushed:** yes
+
+---
+
+## PHASE 22: Robustness & Error Handling — 2026-03-18 11:53:00
+
+**Files changed:** `src/tools/retrieval/index.ts`, `src/api/pxweb-client.ts`, `src/tools/entity-resolution/index.ts`, `src/bugs.regression.test.ts`
+
+**Fixes implemented:**
+
+- **FUNC-5** (`retrieval/index.ts`): The `catch (_) { /* candidates optional */ }` in `get_area_results` replaced with `catch (err)` that logs to stderr and appends a descriptive string to `table_ids` so the failure is visible in the output. Candidate load failure remains non-fatal.
+
+- **FUNC-6** (`pxweb-client.ts`): Added `assertPxWebResponse()` and `assertPxWebMetadata()` shape guards. Called after every `res.json()` in `queryTable()` and `getTableMetadata()`. Throw descriptive errors if expected array fields are missing — prevents silent empty output if PxWeb changes its schema or returns an error payload.
+
+- **FUNC-7** (`entity-resolution/index.ts`): `bigramSimilarity()` signature extended to take the original string `a` alongside `aSet`. Short-string fallback: if `a.length < 2` or `b.length < 2`, returns 1.0 for exact match, 0.5 for prefix match, 0 otherwise. Both `scoreMatch()` and `scoreMatchFast()` updated to pass the extra argument.
+
+**Tests:** 4 new FUNC-7 regression tests. **101/101 passing** (+4 vs Phase 21).
+
+**Commit:** `e5580a1` — Phase 22: robustness
+**Pushed:** yes
+
+---
+
+## PHASE 23: Political Science Framing Improvements — 2026-03-18 12:00:00
+
+**Files changed:** `src/tools/analytics/index.ts`, `src/tools/area/index.ts`, `src/tools/shared.ts`
+
+**Changes implemented:**
+
+- **POL-6**: `compare_across_elections` return object reordered — `caveats` and `comparability_notes` now precede `results[]`.
+- **POL-8**: `years_between` and `pedersen_per_4yr_cycle` added to both `analyze_area_volatility` and `get_area_profile` volatility sections. Normalizes for inter-election gap (÷ years_between/4).
+- **POL-9/STAT-4**: `vote_share_change_pp` in `compare_elections` now computed from raw `vote_share` values before `pct()` rounding. `_raw_vote_share` stored internally, stripped from output.
+- **POL-10**: `area_total_votes` added to every overperformance row in `find_area_overperformance` (both party and candidate branches), from area summed votes.
+- **POL-11**: `biggest_gainer`/`biggest_loser` in `analyze_area_volatility` now filtered to parties with ≥1% share in at least one of the two elections; micro-party noise suppressed. Note added to method block.
+- **POL-13**: EU caveat in `compare_across_elections` expanded: ~40% vs ~70–75% turnout ratio, Reif & Schmitt 1980 second-order election dynamics, EU citizen eligibility nuance.
+- **POL-14**: Municipal cross-election caveat quantified — non-citizen permanent residents ~2–3% of eligible voters; party coverage effect noted.
+- **POL-15**: `subnatLevel('eu_parliament') = 'vaalipiiri'` verified correct for party tables (14gv has `Vaalipiiri ja kuntamuoto`). Documented with JSDoc comment. No code change.
+- **POL-16**: Pedersen method note updated with specific Finnish party discontinuity events: SMP→PS (1995), SKL→KD (2001), Sini/Sininen tulevaisuus split (2017, appears 2019).
+- **STAT-3**: Last histogram bucket's `to` field clamped to actual `max` in `analyze_vote_distribution`.
+- **POL-5**: `historical_trend_caveat` added to `get_area_profile` output noting survivorship bias (only top-N parties from reference year tracked historically).
+
+**Build:** clean. **Tests:** 101/101 passed (unchanged count — no new tests needed for framing changes).
+
+**Commit:** `b0dffb6` — Phase 23: PolSci framing
+**Pushed:** yes
+
+## PHASE 24: EFFICIENCY AND INFRASTRUCTURE CLEANUP — 2026-03-18 12:10:00
+
+### Items completed
+
+**NEW-SEC-7 — Structured access logging (`server-http.ts`)**
+Added body chunk collection alongside the transport using Node.js EventEmitter broadcast semantics. Both listeners (the new logger and the transport's internal listener) receive every chunk. On `req.end`, parses the JSON body to extract `params.name` and `params.arguments` for `tools/call` requests. Logged on `res.finish`: `ISO-timestamp METHOD URL status duration ip=X tool=Y args=Z`. Uses existing `sanitizeForLog()` for both tool name and args. Non-tool-call requests log without the tool part.
+
+**NEW-SEC-8 — Multi-instance rate limit caveat**
+Added 10-line comment block in `server-http.ts` above the rate limiter constants explaining the per-process limitation and recommending Redis-backed rate limiting (rate-limiter-flexible + ioredis) for multi-instance deployments. Added a **Deployment Notes** section to `CLAUDE.md` with the same guidance.
+
+**EFF-2 — verify compare_candidates Map usage**
+Confirmed: `compare_candidates` at line 254 of `analytics/index.ts` builds a `rankMap` with `new Map(allVpRows.map((r, i) => [r.candidate_id, i + 1]))` and uses `rankMap.get(cid)` — O(1). The `findIndex` calls in the file are in other tools (`analyze_candidate_profile`, `compare_parties`, time-series functions). No change needed.
+
+**COST-3 — cache key strategy investigation**
+Each `loadPartyResults` call fetches one year at a time via PxWeb `Vuosi` filter, cached as `data:13sw:parliamentary:YEAR:all`. For `compare_across_elections` N-year calls, this means N separate API calls on cold start. A bulk-fetch optimization (fetch all years at once, cache full dataset, slice locally) would reduce this but requires significant architectural change to `loaders.ts`. Deferred to BACKLOG.
+
+**QUAL-6 — system prompt audit**
+No system prompt file exists in the repo. Item refers to an external Claude Desktop prompt. Marked as N/A in BACKLOG.
+
+**BACKLOG cleanup**
+Removed 20+ resolved items (Phases 20–23 fixes: NEW-SEC-1/2/3/4/6/9/10, FUNC-5/6/7, POL-5/6/7/8/9/11/12/13/14/15/16, STAT-1/3, QUAL-2, EFF-2). Retained STAT-2, NEW-SEC-5, POL-10, COST-3, QUAL-6, and live test items.
+
+### Decisions
+- COST-3 deferred: correct behavior more important than micro-optimization; per-year caching is correct and warms up quickly in practice.
+- No new tests added: Phase 24 changes are logging/documentation only; existing 101 tests cover all functional paths.
+
+**Build:** clean. **Tests:** 101/101 passed.
