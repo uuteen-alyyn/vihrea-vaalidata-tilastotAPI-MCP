@@ -55,3 +55,29 @@ export interface AnalysisModeResponse {
 
 export type OutputMode = 'data' | 'analysis';
 export type ModeResponse = DataModeResponse | AnalysisModeResponse;
+
+/** Socioeconomic composition of eligible voters, candidates, or elected officials */
+export interface VoterBackgroundRow {
+  election_type: ElectionType;
+  year: number;
+  group: 'eligible_voters' | 'candidates' | 'elected';
+  dimension: string;
+  category_code: string;
+  category_name: string;
+  gender: 'total' | 'male' | 'female';
+  count: number;
+  share_pct: number;
+}
+
+/** Actual voter participation rate for a demographic group */
+export interface VoterTurnoutDemographicRow {
+  election_type: ElectionType;
+  year: number;
+  dimension: string;
+  category_code: string;
+  category_name: string;
+  gender: 'total' | 'male' | 'female';
+  eligible_voters: number;
+  votes_cast: number;
+  turnout_pct: number;
+}

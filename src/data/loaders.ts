@@ -10,11 +10,19 @@ import { pxwebClient } from '../api/pxweb-client.js';
 import { withCache } from '../cache/cache.js';
 import { normalizePartyTable, normalizeCandidateByAanestysalue } from './normalizer.js';
 import {
+  normalizeVoterBackground,
+  normalizeVoterTurnoutByDemographics,
+  BACKGROUND_DIMENSION_CODES,
+  groupPxWebCode,
+  genderVarName,
+} from './demographics-normalizer.js';
+import {
   getElectionTables,
   findPartyTableForType,
+  findVoterBackgroundTableForType,
   getDatabasePath,
 } from './election-tables.js';
-import type { ElectionRecord, ElectionType } from './types.js';
+import type { ElectionRecord, ElectionType, VoterBackgroundRow, VoterTurnoutDemographicRow } from './types.js';
 import type { PxWebTableMetadata } from '../api/types.js';
 
 export interface LoadResult {
@@ -228,3 +236,154 @@ export async function loadCandidateResults(
 }
 
 export type { ElectionRecord };
+
+// ── Voter demographics helpers ────────────────────────────────────────────────
+
+const VOTER_BACKGROUND_YEARS: Partial<Record<ElectionType, number[]>> = {
+  parliamentary: [2011, 2015, 2019, 2023],
+  municipal:     [2012, 2017, 2021, 2025],
+};
+
+const VOTER_TURNOUT_DEMO_VALID_YEAR: Partial<Record<ElectionType, number>> = {
+  parliamentary: 2023,
+  municipal:     2025,
+  eu_parliament: 2024,
+  presidential:  2024,
+};
+
+// ── loadVoterBackground ───────────────────────────────────────────────────────
+
+/**
+ * Load socioeconomic composition of eligible voters, candidates, or elected
+ * officials for parliamentary or municipal elections.
+ *
+ * Returns rows for all three genders. Callers can filter by gender if needed.
+ */
+export async function loadVoterBackground(
+  electionType: ElectionType,
+  year: number,
+  group: 'eligible_voters' | 'candidates' | 'elected',
+  dimension: 'employment' | 'education' | 'employer_sector' | 'income_decile' | 'language' | 'origin',
+): Promise<VoterBackgroundRow[]> {
+  const validYears = VOTER_BACKGROUND_YEARS[electionType];
+  if (!validYears) {
+    throw new Error(
+      `get_voter_background is not available for ${electionType}. ` +
+      `Supported: parliamentary (2011/2015/2019/2023), municipal (2012/2017/2021/2025).`
+    );
+  }
+  if (!validYears.includes(year)) {
+    throw new Error(
+      `No voter background data for ${electionType} ${year}. ` +
+      `Available years: ${validYears.join(', ')}.`
+    );
+  }
+
+  const tables = findVoterBackgroundTableForType(electionType);
+  if (!tables?.voter_background) {
+    throw new Error(`No voter background table registered for ${electionType}`);
+  }
+
+  const tableId = tables.voter_background;
+  const dbPath  = getDatabasePath(tables);
+  const metadata = await fetchMetadataCached(dbPath, tableId);
+
+  const dimCodes = BACKGROUND_DIMENSION_CODES[dimension];
+  if (!dimCodes) throw new Error(`Unknown background dimension: ${dimension}`);
+
+  const groupCode  = groupPxWebCode(electionType, group);
+  const genderVar  = genderVarName(electionType);
+  const groupVar   = 'Äänioikeutetut, ehdokkaat ja valitut';
+
+  type FilterItem = { code: string; selection: { filter: 'item' | 'all'; values: string[] } };
+  const filters: FilterItem[] = [
+    { code: 'Vuosi',       selection: { filter: 'item', values: [String(year)] } },
+    { code: genderVar,     selection: { filter: 'all',  values: ['*'] } },
+    { code: groupVar,      selection: { filter: 'item', values: [groupCode] } },
+    { code: 'Taustamuuttujat', selection: { filter: 'item', values: dimCodes } },
+    { code: 'Tiedot',     selection: { filter: 'item', values: ['lkm1', 'pros'] } },
+  ];
+
+  const query = { query: filters, response: { format: 'json' as const } };
+  const cacheKey = `data:${tableId}:${electionType}:${year}:${group}:${dimension}`;
+
+  const { value: response } = await withCache(cacheKey, () =>
+    pxwebClient.queryTable(dbPath, tableId, query)
+  );
+
+  return normalizeVoterBackground(response, metadata, electionType, year, group, dimension);
+}
+
+// ── loadVoterTurnoutByDemographics ────────────────────────────────────────────
+
+/**
+ * Load actual voter participation rate broken down by a demographic dimension.
+ * Returns national-level rows for all three genders.
+ *
+ * @param round  Presidential elections only — 1=first round (default), 2=runoff.
+ */
+export async function loadVoterTurnoutByDemographics(
+  electionType: ElectionType,
+  year: number,
+  dimension: 'age_group' | 'education' | 'income_quintile' | 'origin_language' | 'activity',
+  round = 1,
+): Promise<VoterTurnoutDemographicRow[]> {
+  const validYear = VOTER_TURNOUT_DEMO_VALID_YEAR[electionType];
+  if (validYear === undefined) {
+    throw new Error(
+      `get_voter_turnout_by_demographics is not available for ${electionType}. ` +
+      `Supported: parliamentary (2023), municipal (2025), eu_parliament (2024), presidential (2024).`
+    );
+  }
+  if (year !== validYear) {
+    throw new Error(
+      `Turnout-by-demographics for ${electionType} elections is only available for ${validYear}. ` +
+      `No data exists for ${year} — this has been verified by full archive enumeration.`
+    );
+  }
+
+  const tables = getElectionTables(electionType, year);
+  const tableId = tables?.voter_turnout_by_demographics?.[dimension];
+  if (!tableId) {
+    throw new Error(`No turnout-by-demographics table for ${electionType} ${year} ${dimension}`);
+  }
+
+  const dbPath  = getDatabasePath(tables!);
+  const metadata = await fetchMetadataCached(dbPath, tableId);
+
+  type FilterItem = { code: string; selection: { filter: 'item' | 'all'; values: string[] } };
+  const filters: FilterItem[] = [
+    { code: 'Sukupuoli', selection: { filter: 'all', values: ['*'] } },
+    { code: 'Alue',      selection: { filter: 'item', values: ['SSS'] } },
+  ];
+
+  // Dimension variable: fetch all values, normalizer handles stripping
+  const dimVarCode = metadata.variables.find(
+    (v) => v.code !== 'Sukupuoli' && v.code !== 'Alue' && v.code !== 'Kierros' &&
+           v.code !== 'Vuosi' && v.code !== 'Tiedot'
+  )?.code;
+  if (dimVarCode) {
+    filters.push({ code: dimVarCode, selection: { filter: 'all', values: ['*'] } });
+  }
+
+  // Presidential: filter to the requested round
+  if (metadata.variables.some((v) => v.code === 'Kierros')) {
+    filters.push({ code: 'Kierros', selection: { filter: 'item', values: [String(round)] } });
+  }
+
+  // Tiedot: fetch eligible voters (area), votes cast (area), and turnout %
+  const suffix = ({ parliamentary: 'evaa', municipal: 'kvaa', eu_parliament: 'euvaa', presidential: 'pvaa' } as Record<string, string>)[electionType]!;
+  filters.push({
+    code: 'Tiedot',
+    selection: { filter: 'item', values: [`aoiky_al_${suffix}`, `a_al_${suffix}`, `pros_al_${suffix}`] },
+  });
+
+  const query = { query: filters, response: { format: 'json' as const } };
+  const cacheKey = `data:${tableId}:${electionType}:${year}:${dimension}:r${round}`;
+
+  const { value: response } = await withCache(cacheKey, () =>
+    pxwebClient.queryTable(dbPath, tableId, query)
+  );
+
+  return normalizeVoterTurnoutByDemographics(response, metadata, electionType, year, dimension, round);
+}
