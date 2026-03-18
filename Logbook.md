@@ -1127,3 +1127,31 @@ Implemented EU parliament candidate kunta-level results in `query-engine.ts`.
 **Files changed:** `src/data/query-engine.ts` (kunta branch replaced from error to implementation).
 
 **Build:** clean. **Tests:** 159/159 passed (no regressions).
+
+---
+
+## PHASE A4 + A6: Regional year-specific table + Passiivi historical parliamentary tables — 2026-03-19 01:08:00
+
+**A4 (Regional remaining gaps):**
+Scan confirmed 14y2 [koko_suomi>äänestysalue] with `Äänestysalue × Puolue × Tiedot × Ehdokkaan sukupuoli`. Added to regional 2025 entry as `party_by_aanestysalue` with new `REGIONAL_YEAR_PARTY_SCHEMA`. Also registered `157b–157f` (turnout demographics by age/education/origin/income/activity) — all confirmed 2025-only with [koko_suomi>äänestysalue]. `14z8–14zt` confirmed to have `[no area dim]` — skipped (optional per plan; `14zu–151p` already registered).
+
+**A6 (Passiivi historical parliamentary party tables):**
+Confirmed three year-specific tables in `StatFin_Passiivi/evaa/`:
+- 2019: `130_evaa_2019_tau_103` — `Äänestysalue` × `Puolue` × `Puolueiden kannatus` × `Sukupuoli`, 2268 values. Sar1=votes, Sar2=share, party_total='00', gender_total='S'.
+- 2015: `130_evaa_tau_103` — same schema, 2473 values.
+- 2011: `130_evaa_tau_103_fi` — `Alue` (different var name!) × same, 2703 values. 15-vaalipiiri boundaries (pre-2012 reform).
+
+All have SSS=national, VP##=vaalipiiri, 3-digit=kunta, 8/9-char=äänestysalue area code format.
+
+**vp_prefix fix in normalizer.ts:**
+The `vp_prefix` case had a bug — it returned `kunta` for all non-VP/non-3digit codes (including äänestysalue codes). Fixed to return `aanestysalue` for the else case. Also added `HV##` handling for regional hyvinvointialue codes (which use the same vp_prefix format in 14y2).
+
+**New schemas added to election-tables.ts:**
+- `PARLIAMENTARY_PASSIIVI_YEAR_SCHEMA` (2019/2015) — `Puolueiden kannatus` Sar-dimension format
+- `PARLIAMENTARY_PASSIIVI_2011_SCHEMA` (2011) — same but area_var='Alue'
+- `REGIONAL_YEAR_PARTY_SCHEMA` (14y2) — `Tiedot` content-column format with HV## aggregate codes
+
+**Impact:** `compare_across_dimensions(VIHR, [parl:2019, parl:2023], area_level=vaalipiiri)` now works for 2019 without 403 — previously fell back to national totals only (end-to-end test 1 from plan now possible).
+
+**Files changed:** `src/data/normalizer.ts`, `src/data/election-tables.ts`.
+**Build:** clean. **Tests:** 159/159 passed (no regressions).

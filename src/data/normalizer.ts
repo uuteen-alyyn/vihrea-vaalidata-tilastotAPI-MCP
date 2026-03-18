@@ -81,9 +81,10 @@ export function inferPartyAreaLevel(code: string, schema: PartyTableSchema): Are
       if (/^\d{6}$/.test(code) && code.endsWith('0000')) return schema.aggregate_area_level;
       return 'kunta';
     case 'vp_prefix':
-      if (code.startsWith('VP')) return schema.aggregate_area_level;
+      // VP## = vaalipiiri aggregate; HV## = hyvinvointialue aggregate
+      if (code.startsWith('VP') || code.startsWith('HV')) return schema.aggregate_area_level;
       if (/^\d{3}$/.test(code)) return 'kunta';
-      return 'kunta';
+      return 'aanestysalue';
     case 'five_digit':
       if (code === '00000') return 'koko_suomi';
       if (/^\d{5}$/.test(code) && code.endsWith('000')) return schema.aggregate_area_level;

@@ -241,6 +241,63 @@ const EU_YEAR_PARTY_SCHEMA: PartyTableSchema = {
   aggregate_area_level: 'vaalipiiri',
 };
 
+/**
+ * Passiivi parliamentary year-specific party tables (2019, 2015).
+ * Variable: Äänestysalue × Puolue × Puolueiden kannatus (Sar1=votes, Sar2=share) × Sukupuoli
+ * Area format: SSS=national, VP##=vaalipiiri, 3-digit=kunta, else=äänestysalue (vp_prefix).
+ */
+const PARLIAMENTARY_PASSIIVI_YEAR_SCHEMA: PartyTableSchema = {
+  area_var:             'Äänestysalue',
+  party_var:            'Puolue',
+  measure_var:          'Puolueiden kannatus',
+  votes_code:           'Sar1',   // "Ääniä yhteensä"
+  share_code:           'Sar2',   // "Osuus äänistä %"
+  party_total_code:     '00',     // "Yhteensä"
+  gender_var:           'Sukupuoli',
+  gender_total_code:    'S',      // "Kaikki ehdokkaat"
+  area_code_format:     'vp_prefix',
+  national_code:        'SSS',
+  aggregate_area_level: 'vaalipiiri',
+};
+
+/**
+ * Passiivi parliamentary 2011 year-specific party table.
+ * Same as PARLIAMENTARY_PASSIIVI_YEAR_SCHEMA but area variable code is 'Alue'.
+ * Note: uses 15-vaalipiiri boundaries (pre-2012 reform), 2703 area values.
+ */
+const PARLIAMENTARY_PASSIIVI_2011_SCHEMA: PartyTableSchema = {
+  area_var:             'Alue',
+  party_var:            'Puolue',
+  measure_var:          'Puolueiden kannatus',
+  votes_code:           'Sar1',
+  share_code:           'Sar2',
+  party_total_code:     '00',
+  gender_var:           'Sukupuoli',
+  gender_total_code:    'S',
+  area_code_format:     'vp_prefix',
+  national_code:        'SSS',
+  aggregate_area_level: 'vaalipiiri',
+};
+
+/**
+ * Regional 2025 year-specific all-areas party table (14y2).
+ * Variable: Äänestysalue × Puolue × Tiedot × Ehdokkaan sukupuoli
+ * Area format: SSS=national, HV##=hyvinvointialue, 3-digit=kunta, else=äänestysalue (vp_prefix).
+ */
+const REGIONAL_YEAR_PARTY_SCHEMA: PartyTableSchema = {
+  area_var:             'Äänestysalue',
+  party_var:            'Puolue',
+  measure_var:          'Tiedot',
+  votes_code:           'aanet_yht',
+  share_code:           'osuus_aanista',
+  party_total_code:     'SSS',
+  gender_var:           'Ehdokkaan sukupuoli',
+  gender_total_code:    'SSS',
+  area_code_format:     'vp_prefix',
+  national_code:        'SSS',
+  aggregate_area_level: 'hyvinvointialue',
+};
+
 // ─── Parliamentary elections (Eduskuntavaalit) ────────────────────────────────
 // Base path: StatFin/evaa/  (archive: StatFin_Passiivi/evaa/)
 
@@ -286,6 +343,9 @@ export const PARLIAMENTARY_TABLES: ElectionTableSet[] = [
     year: 2019,
     database: DATABASE.archive,
     // party_by_kunta: covered by 13sw (1983–2023) via 2023 entry fallback
+    // A6: Year-specific all-areas table (Passiivi) — enables vaalipiiri/kunta queries without 403
+    party_by_aanestysalue:        '130_evaa_2019_tau_103',
+    party_by_aanestysalue_schema: PARLIAMENTARY_PASSIIVI_YEAR_SCHEMA,
     geographic_unit_type: 'vaalipiiri',
     candidate_by_aanestysalue: {
       // Variable codes differ from 2023: area codes 'VP##'/'###', measure 'Äänestystiedot' (Sar1/Sar2)
@@ -310,6 +370,9 @@ export const PARLIAMENTARY_TABLES: ElectionTableSet[] = [
     year: 2015,
     database: DATABASE.archive,
     // party_by_kunta: covered by 13sw (1983–2023) via 2023 entry fallback
+    // A6: Year-specific all-areas table (Passiivi) — enables vaalipiiri/kunta queries without 403
+    party_by_aanestysalue:        '130_evaa_tau_103',
+    party_by_aanestysalue_schema: PARLIAMENTARY_PASSIIVI_YEAR_SCHEMA,
     geographic_unit_type: 'vaalipiiri',
     candidate_by_aanestysalue: {
       // Same 13-vaalipiiri boundaries as 2019. Format: Äänestysalue + Äänestystiedot (Sar1=votes, Sar2=share)
@@ -333,6 +396,10 @@ export const PARLIAMENTARY_TABLES: ElectionTableSet[] = [
     year: 2011,
     database: DATABASE.archive,
     // party_by_kunta: covered by 13sw (1983–2023) via 2023 entry fallback
+    // A6: Year-specific all-areas table (Passiivi) — enables vaalipiiri/kunta queries without 403
+    // NOTE: uses 15-vaalipiiri boundaries (pre-2012 reform); area var is 'Alue' not 'Äänestysalue'
+    party_by_aanestysalue:        '130_evaa_tau_103_fi',
+    party_by_aanestysalue_schema: PARLIAMENTARY_PASSIIVI_2011_SCHEMA,
     geographic_unit_type: 'vaalipiiri',
     candidate_by_aanestysalue: {
       // NOTE: Finland had 15 vaalipiiri before the 2012 boundary reform.
@@ -462,6 +529,9 @@ export const REGIONAL_TABLES: ElectionTableSet[] = [
     database: DATABASE.active,
     party_by_kunta: 'statfin_alvaa_pxt_14y4',       // 2022–2025, covers both regional years
     party_schema:   REGIONAL_PARTY_SCHEMA,
+    // A4: Year-specific all-areas table — enables hyvinvointialue/kunta queries without 403
+    party_by_aanestysalue:        'statfin_alvaa_pxt_14y2',
+    party_by_aanestysalue_schema: REGIONAL_YEAR_PARTY_SCHEMA,
     geographic_unit_type: 'hyvinvointialue',
     candidate_by_aanestysalue: {
       // 21 hyvinvointialue, one table each
@@ -486,6 +556,14 @@ export const REGIONAL_TABLES: ElectionTableSet[] = [
       'pohjois-pohjanmaa':  'statfin_alvaa_pxt_151m',
       'kainuu':             'statfin_alvaa_pxt_151n',
       'lappi':              'statfin_alvaa_pxt_151p',
+    },
+    // A4: Turnout by demographics — 2025 only (verified by scan_tables.mjs)
+    voter_turnout_by_demographics: {
+      age_group:       'statfin_alvaa_pxt_157b',  // [koko_suomi>äänestysalue]
+      education:       'statfin_alvaa_pxt_157c',
+      origin_language: 'statfin_alvaa_pxt_157d',
+      income_quintile: 'statfin_alvaa_pxt_157e',
+      activity:        'statfin_alvaa_pxt_157f',
     },
   },
   {
