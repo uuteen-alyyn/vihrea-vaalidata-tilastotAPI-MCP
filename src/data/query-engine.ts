@@ -16,7 +16,7 @@
  *   eu_parliament:
  *     vaalipiiri / koko_suomi → 14gx (candidate_by_vaalipiiri)
  *     aanestysalue → 14gw (candidate_by_aanestysalue_eu), requires subject_ids
- *     kunta → error (requires Phase D3 aggregation, not yet implemented)
+ *     kunta → 14gw filtered to KU### rows (D3), requires subject_ids
  *   presidential:
  *     All area levels in one table (14d5). Filter after load.
  */
@@ -121,12 +121,34 @@ async function fetchCandidateRows(
         return { rows, table_ids };
 
       } else if (area_level === 'kunta') {
-        return {
-          rows: [],
-          table_ids: [],
-          error: 'EU parliament candidate data at kunta level requires aggregation ' +
-                 '(Phase D3, not yet implemented). Use area_level="vaalipiiri" or "aanestysalue" instead.',
-        };
+        // D3: EU kunta results via 14gw.
+        // 14gw has the same area dimension as 14h2 (party table): SSS, VP##, KU###, äänestysalue.
+        // Rows normalised by normalizeCandidateByAanestysalue → area_level='kunta' for KU### codes.
+        // Requires subject_ids (candidate_id filter) — without it 247×2079 exceeds cell limit.
+        if (!subject_ids?.length) {
+          return {
+            rows: [],
+            table_ids: [],
+            error: 'EU parliament candidate data at kunta level requires a candidate_id filter. ' +
+                   'Specify subject_ids with at least one candidate code. ' +
+                   'Use area_level="vaalipiiri" for all-candidate queries.',
+          };
+        }
+        const kuntaResults = await Promise.allSettled(
+          subject_ids.map((cid) => loadEUCandidateByAanestysalue(year, cid))
+        );
+        const rows: ElectionRecord[] = [];
+        const table_ids: string[] = [];
+        for (const r of kuntaResults) {
+          if (r.status === 'fulfilled') {
+            let kuntaRows = r.value.rows.filter((row) => row.area_level === 'kunta');
+            if (area_ids?.length) kuntaRows = kuntaRows.filter((row) => area_ids.includes(row.area_id));
+            rows.push(...kuntaRows);
+            if (!table_ids.includes(r.value.tableId)) table_ids.push(r.value.tableId);
+          }
+        }
+        return { rows, table_ids };
+
       } else {
         return {
           rows: [],

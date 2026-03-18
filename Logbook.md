@@ -1109,3 +1109,21 @@ Added `area_level` parameter to both `find_area_overperformance` and `find_area_
 **Files changed:** `src/tools/analytics/index.ts` (added `parseKuntaCode` import, rewrote both tools' candidate branch to handle area_level, added area_level param schema to both).
 
 **Build:** clean. **Tests:** 159/159 passed (no regressions).
+
+---
+
+## PHASE D3: EU kunta results via 14gw — 2026-03-19 00:50:00
+
+Implemented EU parliament candidate kunta-level results in `query-engine.ts`.
+
+**Implementation:** 14gw (candidate_by_aanestysalue_eu) uses the same area dimension as 14h2 (party table): SSS + VP## + KU### + äänestysalue codes. The normalizer (`normalizeCandidateByAanestysalue` → `inferAreaLevelFromCandidateCode`) already classifies KU### codes as `area_level: 'kunta'`. D3 just filters existing rows for `kunta` level.
+
+**Routing in `loadEUCandidateForType`:**
+- `area_level: 'kunta'` + subject_ids provided → call `loadEUCandidateByAanestysalue` per candidate, filter rows for `area_level === 'kunta'`
+- `area_level: 'kunta'` without subject_ids → error (same cell-limit constraint as äänestysalue level)
+
+**Note:** The assumption that 14gw has KU### rows is based on analogy with 14h2 (same 2079 area values, same table family). This can be verified with a live API call against an EU 2024 candidate. If 14gw only has äänestysalue-level codes (no KU### rows), the returned `rows` array will be empty and we'd need to add the äänestysalue→kunta aggregation using `parseKuntaCode`.
+
+**Files changed:** `src/data/query-engine.ts` (kunta branch replaced from error to implementation).
+
+**Build:** clean. **Tests:** 159/159 passed (no regressions).
