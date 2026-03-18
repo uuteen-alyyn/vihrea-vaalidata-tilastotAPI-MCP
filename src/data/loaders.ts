@@ -310,6 +310,131 @@ export async function loadCandidateResults(
 
 export type { ElectionRecord };
 
+// ─── EU candidate loaders ─────────────────────────────────────────────────────
+
+/**
+ * Load EU parliament candidate results by vaalipiiri (14gx).
+ * Returns all candidates × 14 vaalipiiri + national. No filter needed
+ * unless filtering to a specific candidate (~3500 cells — within limit).
+ *
+ * Uses `normalizeCandidateByAanestysalue` which now handles:
+ *   - `Vaalipiiri` as the area variable
+ *   - `Puolue ja ehdokas` as the candidate variable (mixed with party aggregates)
+ *   - Skips non-numeric codes (party aggregate rows like VIHR, SDP)
+ *
+ * @param year        EU election year (currently 2024 only)
+ * @param candidateId Optional candidate code to filter to (more efficient)
+ */
+export async function loadEUCandidateByVaalipiiri(
+  year: number,
+  candidateId?: string
+): Promise<CandidateLoadResult> {
+  const tables = getElectionTables('eu_parliament', year);
+  if (!tables?.candidate_by_vaalipiiri) {
+    throw new Error(`No EU candidate_by_vaalipiiri table for year ${year}`);
+  }
+  const tableId = tables.candidate_by_vaalipiiri;
+  const dbPath  = getDatabasePath(tables);
+  const metadata = await fetchMetadataCached(dbPath, tableId);
+
+  type FilterItem = { code: string; selection: { filter: 'item' | 'all'; values: string[] } };
+  const filters: FilterItem[] = [];
+
+  if (metadata.variables.some((v) => v.code === 'Vuosi')) {
+    filters.push({ code: 'Vuosi', selection: { filter: 'item', values: [String(year)] } });
+  }
+
+  filters.push({
+    code: 'Puolue ja ehdokas',
+    selection: candidateId
+      ? { filter: 'item', values: [candidateId] }
+      : { filter: 'all', values: ['*'] },
+  });
+
+  filters.push({ code: 'Vaalipiiri', selection: { filter: 'all', values: ['*'] } });
+
+  // Detect Tiedot variable and vote/share codes
+  const tiedotVar = metadata.variables.find((v) => v.code === 'Tiedot');
+  const votesCode = tiedotVar?.values.find(
+    (_, i) => (tiedotVar.valueTexts[i] ?? '').toLowerCase().includes('äänimäärä') ||
+              (tiedotVar.valueTexts[i] ?? '').toLowerCase().includes('äänet')
+  ) ?? 'euvaa_aanet';
+  const shareCode = tiedotVar?.values.find(
+    (_, i) => (tiedotVar.valueTexts[i] ?? '').toLowerCase().includes('osuus')
+  ) ?? 'euvaa_osuus_aanista';
+  filters.push({ code: 'Tiedot', selection: { filter: 'item', values: [votesCode, shareCode] } });
+
+  const query    = { query: filters, response: { format: 'json' as const } };
+  const cacheKey = `data:${tableId}:eu_parliament:${year}:${candidateId ?? 'all'}:vaalipiiri`;
+
+  const { value: response, cache_hit } = await withCache(cacheKey, () =>
+    pxwebClient.queryTable(dbPath, tableId, query)
+  );
+
+  const rows = normalizeCandidateByAanestysalue(response, metadata, year, 'eu_parliament');
+  const unit_code = 'SSS';
+  return { rows, tableId, cache_hit, unit_code };
+}
+
+/**
+ * Load EU parliament candidate results by äänestysalue for a specific candidate (14gw).
+ * Requires candidateId — without it 247 candidates × 2079 areas exceeds PxWeb cell limit.
+ *
+ * @param year        EU election year (currently 2024 only)
+ * @param candidateId Required candidate code
+ */
+export async function loadEUCandidateByAanestysalue(
+  year: number,
+  candidateId: string
+): Promise<CandidateLoadResult> {
+  const tables = getElectionTables('eu_parliament', year);
+  if (!tables?.candidate_by_aanestysalue_eu) {
+    throw new Error(`No EU candidate_by_aanestysalue_eu table for year ${year}`);
+  }
+  const tableId = tables.candidate_by_aanestysalue_eu;
+  const dbPath  = getDatabasePath(tables);
+  const metadata = await fetchMetadataCached(dbPath, tableId);
+
+  // Detect area variable (may be 'Äänestysalue' or 'Alue/Äänestysalue')
+  const areaVarCandidates = ['Alue/Äänestysalue', 'Äänestysalue', 'Alue'];
+  const areaVarCode = metadata.variables.find((v) => areaVarCandidates.includes(v.code))?.code;
+
+  type FilterItem = { code: string; selection: { filter: 'item' | 'all'; values: string[] } };
+  const filters: FilterItem[] = [];
+
+  if (metadata.variables.some((v) => v.code === 'Vuosi')) {
+    filters.push({ code: 'Vuosi', selection: { filter: 'item', values: [String(year)] } });
+  }
+  if (areaVarCode) {
+    filters.push({ code: areaVarCode, selection: { filter: 'all', values: ['*'] } });
+  }
+  filters.push({ code: 'Ehdokas', selection: { filter: 'item', values: [candidateId] } });
+
+  const tiedotVar = metadata.variables.find(
+    (v) => v.code === 'Tiedot' || v.code === 'Äänestystiedot'
+  );
+  const tiedotVarCode = tiedotVar?.code ?? 'Tiedot';
+  const votesCode = tiedotVar?.values.find(
+    (_, i) => (tiedotVar.valueTexts[i] ?? '').toLowerCase().includes('äänimäärä') ||
+              (tiedotVar.valueTexts[i] ?? '').toLowerCase().includes('äänet')
+  ) ?? 'euvaa_aanet';
+  const shareCode = tiedotVar?.values.find(
+    (_, i) => (tiedotVar.valueTexts[i] ?? '').toLowerCase().includes('osuus')
+  ) ?? 'euvaa_osuus_aanista';
+  filters.push({ code: tiedotVarCode, selection: { filter: 'item', values: [votesCode, shareCode] } });
+
+  const query    = { query: filters, response: { format: 'json' as const } };
+  const cacheKey = `data:${tableId}:eu_parliament:${year}:${candidateId}:all`;
+
+  const { value: response, cache_hit } = await withCache(cacheKey, () =>
+    pxwebClient.queryTable(dbPath, tableId, query)
+  );
+
+  const rows = normalizeCandidateByAanestysalue(response, metadata, year, 'eu_parliament');
+  const unit_code = 'SSS';
+  return { rows, tableId, cache_hit, unit_code };
+}
+
 // ── Voter demographics helpers ────────────────────────────────────────────────
 
 const VOTER_BACKGROUND_YEARS: Partial<Record<ElectionType, number[]>> = {

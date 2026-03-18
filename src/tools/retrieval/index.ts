@@ -14,8 +14,9 @@ import {
   loadPartyResults,
   loadCandidateResults,
 } from '../../data/loaders.js';
+import { queryElectionData } from '../../data/query-engine.js';
 import { parseOutputMode } from '../../utils/output-mode.js';
-import type { ElectionRecord, ElectionType } from '../../data/types.js';
+import type { ElectionRecord, ElectionType, AreaLevel } from '../../data/types.js';
 import type { PxWebTableMetadata } from '../../api/types.js';
 import { ELECTION_TYPE_PARAM } from '../shared.js';
 
@@ -286,6 +287,142 @@ export function registerRetrievalTools(server: McpServer): void {
     },
     async ({ year, election_type, subject, n, area_id, unit_key }) =>
       computeRankings({ year, election_type, subject, area_id, unit_key, limit: n })
+  );
+
+  // ── query_election_data ───────────────────────────────────────────────────
+  server.tool(
+    'query_election_data',
+    'Unified query engine for Finnish election data. Supports any combination of election types, ' +
+    'years, and geographic levels in a single call. Results are normalized to a common schema ' +
+    'and can span multiple elections for cross-election comparisons. ' +
+    '\n\nParty queries: returns pre-aggregated party results (all area levels available). ' +
+    '\nCandidate queries — parliamentary/municipal/regional: fans out to per-unit tables (vaalipiiri/hyvinvointialue). ' +
+    'EU parliament: vaalipiiri/koko_suomi level via 14gx; äänestysalue level requires subject_ids. ' +
+    'Presidential: all area levels from one national table. ' +
+    '\n\nUse this tool for: cross-election party comparisons, candidate results across years, ' +
+    'multi-year trends at any geographic level.',
+    {
+      subject_type: z.enum(['party', 'candidate']).describe(
+        'Type of subject. "party" = party vote results. "candidate" = individual candidate results.'
+      ),
+      election_types: z.array(
+        z.enum(['parliamentary', 'municipal', 'eu_parliament', 'presidential', 'regional'])
+      ).describe(
+        'One or more election types to query. For cross-election comparisons, pass multiple types. ' +
+        'Example: ["parliamentary", "municipal"] compares the same party across both election types.'
+      ),
+      years: z.array(z.number()).describe(
+        'One or more election years to query. All years are fetched in parallel and merged. ' +
+        'Example: [2019, 2023] for two parliamentary elections.'
+      ),
+      area_level: z.enum(['koko_suomi', 'vaalipiiri', 'kunta', 'aanestysalue', 'hyvinvointialue']).describe(
+        'Geographic granularity of results. ' +
+        'koko_suomi=national total, vaalipiiri=electoral district, kunta=municipality, ' +
+        'aanestysalue=voting district, hyvinvointialue=welfare area (regional elections only). ' +
+        'This parameter is required — do not infer it.'
+      ),
+      subject_ids: z.array(z.string()).optional().describe(
+        'Filter to specific party or candidate IDs (PxWeb codes). Omit for all. ' +
+        'Party examples: "VIHR", "SDP", "KOK". Candidate example: "050196". ' +
+        'Use resolve_party or resolve_candidate first to get the correct code.'
+      ),
+      area_ids: z.array(z.string()).optional().describe(
+        'Filter to specific area codes. Omit for all areas at the requested level. ' +
+        'Examples: ["VP01", "VP06"] for Helsinki and Pirkanmaa vaalipiiri; ' +
+        '["KU091", "KU837"] for Helsinki and Tampere municipalities.'
+      ),
+      round: z.number().optional().describe(
+        'Presidential elections only: 1 = first round, 2 = second round (runoff). Omit for all rounds.'
+      ),
+      output_mode: z.enum(['rows', 'analysis']).optional().describe(
+        'rows = normalized ElectionRecord rows (default). analysis = summary table with totals.'
+      ),
+    },
+    async ({ subject_type, election_types, years, area_level, subject_ids, area_ids, round, output_mode }) => {
+      try {
+        const result = await queryElectionData({
+          subject_type,
+          election_types: election_types as ElectionType[],
+          years,
+          area_level: area_level as AreaLevel,
+          subject_ids,
+          area_ids,
+          round,
+        });
+
+        const source = {
+          table_ids: result.table_ids,
+          query_timestamp: new Date().toISOString(),
+          skipped_elections: result.skipped_elections,
+        };
+
+        const mode = output_mode ?? 'rows';
+
+        if (mode === 'analysis') {
+          // Build a summary: group by (election_type, year, subject) and sum votes
+          type SummaryKey = string;
+          const bySubject = new Map<SummaryKey, {
+            election_type: string; year: number;
+            subject_id: string; subject_name: string;
+            total_votes: number; area_count: number;
+          }>();
+
+          for (const row of result.rows) {
+            const subjectId = subject_type === 'party' ? (row.party_id ?? '') : (row.candidate_id ?? '');
+            const subjectName = subject_type === 'party' ? (row.party_name ?? subjectId) : (row.candidate_name ?? subjectId);
+            const key = `${row.election_type}::${row.year}::${subjectId}`;
+            const existing = bySubject.get(key);
+            if (existing) {
+              existing.total_votes += row.votes;
+              existing.area_count++;
+            } else {
+              bySubject.set(key, {
+                election_type: row.election_type,
+                year: row.year,
+                subject_id: subjectId,
+                subject_name: subjectName,
+                total_votes: row.votes,
+                area_count: 1,
+              });
+            }
+          }
+
+          const summaryTable = [...bySubject.values()].sort((a, b) =>
+            a.election_type.localeCompare(b.election_type) ||
+            a.year - b.year ||
+            b.total_votes - a.total_votes
+          );
+
+          return {
+            content: [{
+              type: 'text' as const,
+              text: JSON.stringify({
+                mode: 'analysis',
+                summary: {
+                  total_rows: result.rows.length,
+                  elections_queried: election_types.length * years.length,
+                  area_level,
+                  subject_type,
+                },
+                tables: { by_subject: summaryTable },
+                method: { description: `Votes summed per (election_type, year, subject) across all ${area_level} rows.` },
+                source,
+              }, null, 2),
+            }],
+          };
+        }
+
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({ mode: 'rows', rows: result.rows, source }, null, 2),
+          }],
+        };
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return { content: [{ type: 'text' as const, text: JSON.stringify({ error: msg }) }] };
+      }
+    }
   );
 
 }

@@ -268,14 +268,26 @@ export function normalizeCandidateByAanestysalue(
   const keyIdx = buildKeyIndex(response.columns);
   const valIdx = buildValueIndex(response.columns);
 
-  // Detect area variable — try each known name; null means national-only (no area var)
-  const AREA_VAR_CANDIDATES = ['Alue/Äänestysalue', 'Äänestysalue', 'Alue'];
+  // Detect area variable — try each known name; null means national-only (no area var).
+  // 'Vaalipiiri' is used by EU 14gx (candidate votes by vaalipiiri).
+  const AREA_VAR_CANDIDATES = ['Alue/Äänestysalue', 'Äänestysalue', 'Alue', 'Vaalipiiri'];
   const AREA_KEY = metadata.variables.find(
     (v) => AREA_VAR_CANDIDATES.includes(v.code)
   )?.code ?? null;
 
   const areaTexts      = AREA_KEY ? buildValueTextMap(metadata, AREA_KEY) : new Map<string, string>();
-  const candidateTexts = buildValueTextMap(metadata, 'Ehdokas');
+
+  // Detect candidate variable.
+  // 'Ehdokas' is used by parliamentary/municipal/regional/presidential tables.
+  // 'Puolue ja ehdokas' is used by EU 14gx (candidates mixed with party aggregates in one dim).
+  const CANDIDATE_KEY = metadata.variables.find(
+    (v) => v.code === 'Ehdokas' || v.code === 'Puolue ja ehdokas'
+  )?.code ?? 'Ehdokas';
+
+  // When using 'Puolue ja ehdokas', skip non-numeric codes (party aggregates like VIHR, SDP).
+  const candidateVarIsMixed = CANDIDATE_KEY === 'Puolue ja ehdokas';
+
+  const candidateTexts = buildValueTextMap(metadata, CANDIDATE_KEY);
 
   // Detect measure variable (Tiedot or Äänestystiedot / Puolueiden kannatus)
   const tiedotVar = metadata.variables.find(
@@ -301,8 +313,6 @@ export function normalizeCandidateByAanestysalue(
     Object.prototype.hasOwnProperty.call(keyIdx, VOTES_KEY) ||
     (tiedotVar !== undefined && !Object.prototype.hasOwnProperty.call(valIdx, VOTES_KEY));
 
-  const CANDIDATE_KEY = 'Ehdokas';
-
   // Presidential candidate codes to skip (non-candidates)
   const SKIP_CANDIDATE_CODES = new Set(['00', '11']);
 
@@ -322,6 +332,9 @@ export function normalizeCandidateByAanestysalue(
       const roundCode     = ROUND_KEY ? row.key[keyIdx[ROUND_KEY]] : undefined;
       if (candidateCode === undefined) continue;
       if (SKIP_CANDIDATE_CODES.has(candidateCode)) continue;
+      // 'Puolue ja ehdokas' mixes party aggregates (VIHR, SDP…) with candidates (numeric IDs).
+      // Skip non-numeric codes when using this mixed variable.
+      if (candidateVarIsMixed && !/^\d+$/.test(candidateCode)) continue;
       const roundNum = roundCode ? roundCodeToNumber.get(roundCode) : undefined;
       if (roundFilter !== undefined && roundNum !== undefined && roundNum !== roundFilter) continue;
       const val = parseFloat(row.values[0] ?? '0');
@@ -358,6 +371,7 @@ export function normalizeCandidateByAanestysalue(
       const roundCode     = ROUND_KEY ? row.key[keyIdx[ROUND_KEY]] : undefined;
       if (candidateCode === undefined) continue;
       if (SKIP_CANDIDATE_CODES.has(candidateCode)) continue;
+      if (candidateVarIsMixed && !/^\d+$/.test(candidateCode)) continue;
       const roundNum = roundCode ? roundCodeToNumber.get(roundCode) : undefined;
       if (roundFilter !== undefined && roundNum !== undefined && roundNum !== roundFilter) continue;
 

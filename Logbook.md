@@ -988,3 +988,45 @@ Created `src/data/area-hierarchy.ts` with cross-election geographic join utiliti
 **Files changed:** `src/data/area-hierarchy.ts` (new), `src/data/area-hierarchy.test.ts` (new).
 
 **Build:** clean. **Tests:** 159/159 passed (21 new).
+
+---
+
+## PHASE C2: query_election_data — UNIFIED QUERY ENGINE — 2026-03-19 00:25:00
+
+Created `src/data/query-engine.ts` and registered `query_election_data` MCP tool.
+
+**Purpose:** A single tool that can query any combination of election type, year, and area level, and merge results into one normalized row set. Enables cross-election comparisons (e.g. VIHR in parliamentary 2023 vs municipal 2025 vs EU 2024) without calling 3 separate tools.
+
+**Routing logic:**
+
+- **Party data** (any election type): delegates to `loadPartyResults` which already applies A1 routing (year-specific tables to avoid 403). Filters to requested `area_level`, `subject_ids`, `area_ids`.
+- **Candidate – EU parliament**:
+  - `area_level = vaalipiiri` or `koko_suomi` → `loadEUCandidateByVaalipiiri` (14gx). Filter 14gx to single candidate if `subject_ids=[1]` for efficiency. For multi-subject: load all, filter client-side.
+  - `area_level = aanestysalue` → `loadEUCandidateByAanestysalue` (14gw) per candidate. Requires `subject_ids` (without it: cell limit exceeded — returns clear error).
+  - `area_level = kunta` → explicit error (requires Phase D3 aggregation, not yet implemented).
+- **Candidate – presidential**: `loadCandidateResults(year, 'national', ...)` — 14d5 has all area levels; filter after load.
+- **Candidate – parliamentary/municipal/regional**: fan-out to all per-unit tables in parallel (13 vaalipiiri for parl/mun, 21 hyvinvointialue for regional). VP## area_ids optimization: if all requested areas are VP##, only load the matching unit tables. Filter by area_level, subject_ids, area_ids client-side.
+
+**Multi-election support:** Iterates over all (election_type × year) combinations, runs all fetches in parallel, merges rows. Skipped/failed elections recorded in `skipped_elections` field (not fatal).
+
+**Normalizer updates (backward-compatible):**
+- Added `'Vaalipiiri'` to `AREA_VAR_CANDIDATES` list — enables area detection for EU 14gx table.
+- Added `'Puolue ja ehdokas'` to candidate variable detection — EU 14gx uses this mixed variable (parties + candidates in one dim). Non-numeric codes (party aggregates like VIHR, SDP) are filtered out via the `candidateVarIsMixed` flag.
+
+**New EU candidate loaders added to `src/data/loaders.ts`:**
+- `loadEUCandidateByVaalipiiri(year, candidateId?)` — loads from 14gx. Optional candidateId filter.
+- `loadEUCandidateByAanestysalue(year, candidateId)` — loads from 14gw. candidateId required.
+
+**`query_election_data` tool parameters:**
+- `subject_type`: 'party' | 'candidate'
+- `election_types`: ElectionType[] (required)
+- `years`: number[] (required)
+- `area_level`: AreaLevel (required — never inferred)
+- `subject_ids?`: string[] (party or candidate codes)
+- `area_ids?`: string[] (area code filter)
+- `round?`: presidential round filter
+- `output_mode?`: 'rows' (default) | 'analysis'
+
+**Files changed:** `src/data/normalizer.ts`, `src/data/loaders.ts`, `src/data/query-engine.ts` (new), `src/tools/retrieval/index.ts`.
+
+**Build:** clean. **Tests:** 159/159 passed (no regressions).
