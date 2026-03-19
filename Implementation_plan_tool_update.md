@@ -292,58 +292,117 @@ This is still above the ideal ~25 for reliable LLM selection, but significantly 
 
 ## 3. Tilastokeskus API Structure — Effectiveness Audit
 
-### 3.1 Current table routing
+### 3.0 API-first principle (updated after full table audit)
 
-The routing engine (`loadPartyResults`, `loadCandidateResults`, `queryElectionData`) correctly applies:
-- Year-specific tables for all-area queries (`13t2`, `14vm`, `14h2`, `14y2`) to avoid 403 cell-limit errors
-- Multi-year tables (`13sw`, `14z7`, `14gv`) when filtering to a single `area_id`
-- Per-unit fan-out for candidate tables (`13t6`–`13ti` for parliamentary, etc.)
+A systematic check of all registered and unregistered tables revealed that **the API already computes several values we are currently calculating ourselves**. The rule going forward: before implementing any computation, verify that Tilastokeskus does not already publish the result directly. This section documents all confirmed cases.
 
-**Assessment: the routing is correct.** However, there are three underutilised opportunities:
+### 3.1 Pre-computed pp-change (vote share change)
 
-### 3.2 Underutilised tables
+Three multi-year party tables include **vote share change in percentage points** vs. the previous election of the same type, pre-computed by Tilastokeskus:
 
-**3.2.1 `statfin_pvaa_pxt_14db` — Presidential multi-year vaalipiiri**
+| Table | Coverage | Pre-computed Tiedot field |
+|---|---|---|
+| `13sw` | Parliamentary 1983–2023, kunta + vaalipiiri | `Osuus äänistä, muutos edelliseen eduskuntavaaliin (pros. yksikkö)` |
+| `14z7` | Municipal 1976–2025, kunta + vaalipiiri | `Osuus äänistä, muutos edelliseen kuntavaaliin (pros. yksikkö)` |
+| `14y4` | Regional 2022–2025, hyvinvointialue + kunta | `Osuus äänistä, muutos edelliseen aluevaaliin (pros. yksikkö)` |
+| `14h3` | EU 2024 vs 2019, kunta + vaalipiiri | `Muutos edellisiin vaaleihin (%-yks.)` |
+| `13sv` | Parl turnout 1983–2023, kunta + vaalipiiri | `Äänestysprosentti, muutos... (pros. yksikkö)` |
+| `14z6` | Municipal turnout 1976–2025, kunta + vaalipiiri | `Äänestysprosentti, muutos... (pros. yksikkö)` |
 
-This table (1994–2024, all candidates, koko_suomi + 13 vaalipiirit) is registered in the `candidate_multiyr_vaalipiiri` field but not yet routed in any tool. `get_candidate_results` for presidential elections still routes to `14d5` (2024 only, äänestysalue level). The multi-year vaalipiiri table enables cross-year presidential trajectory analysis and should be wired into `query_election_data` for presidential + vaalipiiri + multi-year queries.
+**Important scope note:** `14gv` (EU multi-year) does NOT have pre-computed change. For cross-year EU party comparison, the diff must be computed from two separate year queries, or `14h3` used for 2024 vs 2019 at kunta level.
 
-**3.2.2 Historical parliamentary party tables (Passiivi: 2019, 2015, 2011)**
+**Impact on tools:**
 
-The `party_by_aanestysalue` tables for 2019 (`130_evaa_2019_tau_103`), 2015 (`130_evaa_tau_103`), and 2011 (`130_evaa_tau_103_fi`) are registered and have been schema-mapped. Verify they are correctly routed in `loadPartyResults` when `areaId` is omitted for these years. If not, area-level party queries for parl:2019/2015/2011 silently fall back to national totals.
+| Tool | Current (wrong) approach | Correct API-first approach |
+|---|---|---|
+| `compare_across_dimensions` pp-change (parl/municipal/regional) | Load year1 + year2 separately, compute diff | Query `13sw`/`14z7`/`14y4` for year2 with muutos field → **1 API call** |
+| `find_vote_decline_areas` | Load year1 + year2, compute loss per area | Query `14z7` for year2 only, filter `muutos < -threshold` → **1 API call** |
+| `analyze_area_volatility` (Pedersen inputs) | Load year1 + year2 per pair, compute Δpi per party | Query `13sw`/`14z7` with muutos field, Σ\|muutos\| / 2 directly → **1 API call per period** |
+| `get_area_profile` historical trends | N queries for N years | One `13sw`/`14z7` query with all years + muutos → **1 API call** |
+| `analyze_party_profile` | No change shown | Add pp-change from muutos field in same party results call |
 
-**3.2.3 `get_turnout` 500-row silent cap**
+### 3.2 Pre-computed municipal seat counts
 
-The turnout table for äänestysalue-level data has ~2000 rows. The 500-row cap truncates silently. Either:
-- Raise the cap to 5000, or
-- Return a `rows_truncated: true` flag and `total_rows` count so the LLM knows it is getting a partial result
+**`14z7`** (the municipal multi-year party table already in use) contains two fields that are completely unexposed in any current tool:
 
-### 3.3 Missing ENP computation
+- `Valittujen lukumäärä` — seats won per party, per municipality, all elections 1976–2025
+- `Osuus valituista %` — seat share per party
 
-**Effective Number of Parties (ENP)** = 1 / Σ(pi²) where pi = party's national vote share fraction. This is the single most cited metric in Finnish comparative politics. Every election analysis published in Finnish political science journals includes it. It requires no additional API calls — it can be computed from existing `get_party_results` output.
+This is the municipal equivalent of a D'Hondt seat allocation — Tilastokeskus computes it and publishes it directly. No computation needed. Should be surfaced in:
+- `analyze_party_profile` for municipal elections: add `seats_won` and `seat_share_pct` fields
+- `get_area_results` for municipal: include seat data alongside vote data
 
-**Recommended:** Add ENP computation to `analyze_party_profile` (and optionally `get_area_profile`) and register it in `explain_metric`.
+**Note:** Parliamentary and regional equivalents are NOT in the multi-year party tables. For parliamentary, the Vertausluku (comparison number) in candidate tables enables determination, but the seat count per party per vaalipiiri is not a pre-computed measure in the party tables.
 
-### 3.4 Election outcome: Valintatieto (no D'Hondt needed)
+### 3.3 Election outcome: Valintatieto
 
-**Tilastokeskus already publishes election outcome directly in the API.** No D'Hondt computation is required. The following tables contain `Valintatieto` (election status) data:
+**Tilastokeskus already publishes election outcome (elected / substitute / not elected) directly in the API.** No D'Hondt computation is required.
 
-| Election | Table | Field | Values |
+**Critical update after full candidate table audit:** The already-mapped per-vaalipiiri parliamentary candidate tables (`13t6`–`13ti`) already have `Valintatieto` as a filterable **dimension** (not just a Tiedot measure). This means you can query for elected candidates only by including `Valintatieto=['1']` in the filter — no post-processing needed. These tables also include `Vertausluku` (D'Hondt comparison number) in `Tiedot`.
+
+| Election | Table | Where outcome lives | Incumbent flag |
 |---|---|---|---|
-| Parliamentary 2023 | `statfin_evaa_pxt_13t3` | `Valintatieto` dimension | SSS=all, 1=Valittu, 2=Varalla, 3=Ei valittu |
-| Municipal 2025 | `statfin_kvaa_pxt_14uk`–`14v8` (per vaalipiiri) | `Tiedot: kvaa_valinta` | 1=valittu, 2=varalla, 3=ei valittu |
-| Regional 2025 | `statfin_alvaa_pxt_14z8`–`14zt` (per hyvinvointialue) | `Tiedot: alvaa_valinta` | 1=valittu, 2=varalla, 3=ei valittu |
-| EU 2024 | `statfin_euvaa_pxt_14gz` | Table contains only elected MEPs | — |
-| Presidential | `statfin_pvaa_pxt_14d5` | No explicit flag — winner implicit from round 2 >50% | — |
+| Parliamentary 2023 | `13t6`–`13ti` (already mapped) | `Valintatieto` dimension (Valittu/Varalla/Ei valittu) | Not available |
+| Parliamentary 2023 | `13t3` (national summary, not yet mapped) | `Valintatieto` dimension + `vluku` (Vertausluku) | Not available |
+| Municipal 2025 | `14uk`–`14v8` (partially mapped) | `Tiedot: kvaa_valinta` (1/2/3) | `kvaa_kunnanvalt` (1=was councillor, 3=no) |
+| Regional 2025 | `14z8`–`14zt` (not mapped) | `Tiedot: alvaa_valinta` (1/2/3) | `alvaa_aluevalt` (1=was councillor, 3=no) |
+| EU 2024 | `14gz` (not mapped) | Table contains elected MEPs only | Not available |
+| Presidential | `14d5` (mapped) | No flag — winner has >50% in round 2 | Not applicable |
 
-Additionally:
-- **Municipal `14uk`–`14v8`** also contains `kvaa_kunnanvalt` = "Valtuutettu edellisessä valtuustossa" (was candidate a sitting councillor in the previous term: 1=yes, 3=no)
-- **Regional `14z8`–`14zt`** also contains `alvaa_aluevalt` = "Valtuutettu edellisessä aluevaltuustossa" (same for regional council)
+**Note:** Municipal (`14v9`–`14vk`) and regional (`14zu`–`151p`) per-unit candidate tables do NOT contain Valintatieto — they only have votes. The outcome data lives in separate per-vaalipiiri/per-hyvinvointialue outcome tables (`14uk`–`14v8`, `14z8`–`14zt`).
 
-The **incumbent flag** is high-value political context: it tells you whether an elected representative is a continuity pick or a new face, and whether a losing candidate was a sitting councillor who was voted out.
+### 3.4 Socioeconomic area classification
 
-**Note on `13t3`:** This table also contains `vluku` (Vertausluku = D'Hondt comparison number) in its Tiedot dimension, meaning the API exposes the actual D'Hondt divisors as data — useful for showing *why* a candidate was elected (their comparison rank across parties), without needing to compute it ourselves.
+`13yh` (parliamentary, 2019+2023) and `14yb` (municipal, 2017+2021+2025) classify all municipalities along two axes simultaneously:
 
-**Note on parliamentary 2019/2015/2011:** Equivalent outcome tables may exist in `StatFin_Passiivi`. Scan before assuming unavailable — but this is low priority since the current implementation plan focuses on 2023.
+1. **Party support level**: high/medium/low for KOK, SDP, KESK, VIHR, VAS, KD, RKP, PS
+2. **Socioeconomic factors**: income level (high/medium/low), economic structure (agricultural/industrial/service), urbanization (urban/semi-urban/rural), pensioner share, child (under-7) share, unemployment rate
+
+Each municipality falls into one cell of this classification matrix. The tables report vote share and pp-change (`Kannatuksen muutos %`) for each cell.
+
+This enables questions like "How did VIHR do in high-urbanization, high-income areas vs. low-urbanization, low-income areas?" without computing the classification ourselves. These tables are not currently registered and no tool uses them.
+
+**Note:** These tables are at vaalipiiri level (not kunta level), which limits granularity. They are a useful reference but not a replacement for kunta-level analysis.
+
+### 3.5 Candidate count and composition
+
+`14vm` (municipal 2025 year-specific party table, already registered) and `14yj` (municipal 2025 maakunta level, not registered) contain:
+- `Ehdokkaiden lukumäärä` — candidate count per party
+- `Osuus ehdokkaista %` — share of candidates per party
+
+This enables gender/party composition of candidate lists, which the current tools do not expose. The gender dimension is also in these tables (`Ehdokkaan sukupuoli`), enabling questions like "What share of VIHR candidates were women in Helsinki in 2025?"
+
+### 3.6 What genuinely must be computed (cannot be pulled from API)
+
+| Computation | Used in | Notes |
+|---|---|---|
+| ENP (Laakso-Taagepera) | `analyze_party_profile` | Not published |
+| Pedersen volatility index | `analyze_area_volatility`, `get_area_profile` | Not published, but **inputs are now pre-fetched** via muutos field — sum \|muutos\| / 2 |
+| Geographic concentration (top-N, HHI) | `analyze_geographic_concentration` | Not published |
+| Overperformance vs. national baseline | `find_area_overperformance` | Not published |
+| Vote transfer co-movement + Pearson r | `estimate_vote_transfer_proxy` | Not published |
+| Euclidean distance for comparable areas | `find_comparable_areas` | Not published |
+| Composite strategic scoring | `rank_areas_for_party` | Not published |
+
+### 3.7 Underutilised registered tables
+
+**3.7.1 `statfin_pvaa_pxt_14db` — Presidential multi-year vaalipiiri**
+
+This table (1994–2024, all candidates, koko_suomi + 13 vaalipiirit, includes both rounds) is registered in the `candidate_multiyr_vaalipiiri` field but not yet routed in any tool. `get_candidate_results` for presidential elections still routes to `14d5` (2024 only, äänestysalue level). The multi-year vaalipiiri table enables cross-year presidential trajectory analysis and should be wired into `query_election_data` for presidential + vaalipiiri + multi-year queries.
+
+**3.7.2 Historical parliamentary party tables (Passiivi: 2019, 2015, 2011)**
+
+The `party_by_aanestysalue` tables for 2019, 2015, and 2011 are registered and schema-mapped. Verify they are correctly routed in `loadPartyResults` when `areaId` is omitted. If not, area-level party queries for parl:2019/2015/2011 silently fall back to national totals.
+
+**3.7.3 `get_turnout` 500-row silent cap**
+
+The turnout table for äänestysalue-level data has ~2000 rows. The cap truncates silently. Raise to 5000 and add `rows_truncated` + `total_rows` fields to output.
+
+### 3.8 Missing ENP computation
+
+**Effective Number of Parties (ENP)** = 1 / Σ(pi²) where pi = party's national vote share fraction. This is the single most cited metric in Finnish comparative politics and is not published by Tilastokeskus. It must be computed from existing party results — no extra API call needed.
+
+**Recommended:** Add ENP computation to `analyze_party_profile` and register in `explain_metric`.
 
 **Recommended:** Add `election_outcome` and optionally `incumbent` fields to `analyze_candidate_profile` output by fetching from the appropriate outcome table. See Phase T4 for implementation spec.
 
@@ -499,6 +558,53 @@ See system_prompt.md in this project for a ready-made system prompt to paste in.
 
 ## 7. Implementation Phases
 
+### Phase T0 — API-first routing for pp-change and municipal seats
+
+**Goal:** Stop computing what Tilastokeskus already publishes. No tool interface changes — only internal routing improvements and new fields added to existing tool outputs.
+
+**0.1 — Use pre-computed muutos field for pp-change**
+
+Affected: `compare_across_dimensions`, `find_vote_decline_areas`, `analyze_area_volatility`, `get_area_profile`, `analyze_party_profile`.
+
+For parliamentary and municipal consecutive-year comparisons, add a `loadPartyResultsWithChange(year, electionType, areaId?)` path that:
+- Queries `13sw` (parliamentary) or `14z7` (municipal) or `14y4` (regional) with the muutos Tiedot code included
+- Returns rows with `pp_change_vs_previous` populated from the API-computed muutos field
+- Avoids a second API call for year1 data
+
+For `analyze_area_volatility` (Pedersen): instead of loading year1 + year2 and subtracting, load year2 with muutos → Σ|muutos| / 2 directly. Single API call per period.
+
+For `find_vote_decline_areas`: query year2 with muutos, filter `pp_change < -min_loss`. One API call.
+
+For EU consecutive-year comparison: still requires two separate year queries or use `14h3` kunta-level table (which has change vs 2019 pre-computed for 2024).
+
+**Tiedot codes to add to schemas:**
+
+| Table | Schema field | Code | Label |
+|---|---|---|---|
+| `13sw` | parliamentary multi-year | `pp_change_code` | `Osuus äänistä, muutos edelliseen eduskuntavaaliin (pros. yksikkö)` |
+| `14z7` | municipal multi-year | `pp_change_code` | `Osuus äänistä, muutos edelliseen kuntavaaliin (pros. yksikkö)` |
+| `14y4` | regional multi-year | `pp_change_code` | `Osuus äänistä, muutos edelliseen aluevaaliin (pros. yksikkö)` |
+
+**0.2 — Expose municipal seat counts from `14z7`**
+
+`14z7` already contains `Valittujen lukumäärä` and `Osuus valituista %`. Add these Tiedot codes to the municipal party schema. Expose in:
+- `analyze_party_profile` for municipal: add `seats_won` + `seat_share_pct` fields
+- `get_area_results` for municipal: include seat columns in area output
+
+No new tables. No new API calls. Just expose fields that are already fetched but not returned.
+
+**0.3 — Expose Valintatieto from already-mapped parliamentary candidate tables**
+
+`13t6`–`13ti` have `Valintatieto` as a dimension (Valittu/Varalla/Ei valittu) and `Vertausluku` in Tiedot. These are already queried by `analyze_candidate_profile`. Simply include these fields in the normalized output:
+- Add `election_outcome: 'elected' | 'varalla' | 'not_elected'` to parliamentary candidate results
+- Add `comparison_number: number` (Vertausluku) to parliamentary candidate results
+
+No new tables. No routing changes. These fields are in the existing query response — the normalizer is currently dropping them.
+
+**Tests:** Verify pp_change, seats_won, and election_outcome appear in tool outputs. Existing 159 tests must still pass.
+
+**Commit:** `Phase T0: API-first — pp-change, municipal seats, Valintatieto from existing tables`
+
 ### Phase T1 — Consolidation (removals and merges)
 
 **Goal:** Reduce to ~36 tools. No new functionality.
@@ -572,31 +678,36 @@ Actions:
 
 Tilastokeskus publishes election outcome (elected / substitute / not elected) directly in the API. No D'Hondt computation needed.
 
-**Data sources:**
-- Parliamentary 2023: `statfin_evaa_pxt_13t3` — `Valintatieto` dimension (SSS/1/2/3). Also contains `vluku` (Vertausluku/D'Hondt comparison number) in Tiedot. **Not yet mapped.**
-- Municipal 2025: `statfin_kvaa_pxt_14uk`–`14v8` — `Tiedot: kvaa_valinta` (1/2/3) and `kvaa_kunnanvalt` (incumbent flag). Per-vaalipiiri tables. **Partially mapped, no outcome field exposed.**
-- Regional 2025: `statfin_alvaa_pxt_14z8`–`14zt` — `Tiedot: alvaa_valinta` (1/2/3) and `alvaa_aluevalt` (incumbent flag). Per-hyvinvointialue tables. **Not mapped.**
-- EU 2024: `statfin_euvaa_pxt_14gz` — table of elected MEPs only. **Not mapped.**
-- Presidential: no flag; winner is implicit (round 2 >50%).
+**Data sources (confirmed via live API metadata):**
+
+- **Parliamentary 2023:** `13t6`–`13ti` (already mapped) have `Valintatieto` as a filterable **dimension** AND `Vertausluku` in Tiedot. No new table needed. Filter `Valintatieto=['1']` to get elected candidates only.
+- **Parliamentary 2023 (national view):** `13t3` (not yet mapped) has the same `Valintatieto` dimension + `vluku` (Vertausluku) at national level. Useful for looking up any candidate by ID without knowing their vaalipiiri.
+- **Municipal 2025:** Per-unit tables `14v9`–`14vk` (already mapped) do NOT have outcome data. Outcome is in separate `14uk`–`14v8` tables (`Tiedot: kvaa_valinta`) + incumbent flag (`kvaa_kunnanvalt`). Route from candidate_id prefix (first 2 digits = vaalipiiri code).
+- **Regional 2025:** Per-unit tables `14zu`–`151p` (already mapped) do NOT have outcome data. Outcome in `14z8`–`14zt` (`Tiedot: alvaa_valinta`) + incumbent flag (`alvaa_aluevalt`).
+- **EU 2024:** `14gz` (not mapped) contains only elected MEPs. Presence = elected.
+- **Presidential:** No flag; winner is implicit (round 2 >50%).
 
 **Implementation approach:**
 
-Add a `loadCandidateOutcome(electionType, year, candidateId)` function that:
-1. Routes to the correct outcome table based on election_type
-2. For parliamentary: queries `13t3` filtered to `Ehdokas=[candidateId]`, reads `Valintatieto` and `vluku`
-3. For municipal: determines which `14uk`–`14v8` table from candidate_id prefix (2-digit vaalipiiri code); queries `Tiedot=[kvaa_valinta, kvaa_kunnanvalt]`
-4. For regional: determines which `14z8`–`14zt` table from candidate_id; queries `Tiedot=[alvaa_valinta, alvaa_aluevalt]`
-5. For EU: queries `14gz` — if candidate appears, they were elected
-6. Returns `{ election_outcome: 'elected' | 'varalla' | 'not_elected' | 'unknown', incumbent: boolean | null, comparison_number: number | null }`
+For parliamentary — the simplest case: the candidate's Valintatieto is already in the `13t6`–`13ti` table that `analyze_candidate_profile` already queries. Just include `Valintatieto` in the query response and expose it. No new table fetch needed.
+
+For a general `loadCandidateOutcome(electionType, year, candidateId)` function:
+1. Parliamentary: reuse the already-fetched vaalipiiri candidate data from `13t6`–`13ti`, read `Valintatieto` dimension value
+2. Municipal: determine vaalipiiri from candidate_id prefix (2 digits), query `14uk`–`14v8` for that vaalipiiri, read `kvaa_valinta` and `kvaa_kunnanvalt`
+3. Regional: same pattern with `14z8`–`14zt`
+4. EU: query `14gz`, check if candidate_id appears → elected; absent → not elected
+5. Presidential: derive from vote data (round 2 winner has >50%)
+
+Returns: `{ election_outcome: 'elected' | 'varalla' | 'not_elected' | 'unknown', incumbent: boolean | null, comparison_number: number | null }`
 
 **Expose in `analyze_candidate_profile`:**
 ```typescript
 election_outcome: 'elected' | 'varalla' | 'not_elected' | 'unknown',
-incumbent: true | false | null,   // null for election types without incumbent data (parliamentary)
-comparison_number: number | null,  // Vertausluku — only for parliamentary (from 13t3)
+incumbent: true | false | null,     // null for parliamentary (no incumbent data); true/false for municipal/regional
+comparison_number: number | null,   // Vertausluku from 13t6-13ti; null for other election types
 ```
 
-**Register tables:** Add `candidate_outcome_national?: string` field to `ElectionTableSet` for the `13t3` / `14gz` pattern. For per-unit outcome tables (municipal, regional), the existing `candidate_by_aanestysalue` record can be reused since the 14uk–14v8 / 14z8–14zt tables cover the same vaalipiiri/hyvinvointialue partitioning.
+**Register tables:** Add `candidate_outcome_national?: string` to `ElectionTableSet` for `13t3` and `14gz`. For per-unit outcome tables, add `candidate_outcome_by_unit?: Record<string, string>` mirroring the `candidate_by_aanestysalue` pattern. The 14uk–14v8 and 14z8–14zt tables use the same vaalipiiri/hyvinvointialue key structure.
 
 **Register in `trace_result_lineage`** and add caveats:
 - Parliamentary: `Valintatieto` from 13t3 is Tilastokeskus's official outcome — authoritative, no caveats
@@ -646,9 +757,10 @@ This is the only unrouted registered table. It enables cross-year presidential c
 
 | Phase | Effort | Impact | Recommended order |
 |---|---|---|---|
-| T1 — Consolidation | Medium (code removal + merge) | HIGH — reduces LLM confusion immediately | 1st |
-| T2 — Renames and descriptions | Small | HIGH — fixes misleading names that cause bad tool selection | 2nd |
-| T5 — System prompt + README | Small | HIGH — without a system prompt, testing is unreliable | 3rd (parallelize with T2) |
-| T3 — Mathematical fixes | Small | MEDIUM — Pedersen normalization is wrong but not user-harmful today | 4th |
-| T4 — ENP + Valintatieto outcome | Medium | HIGH political value; simpler than originally planned (no D'Hondt needed — data comes from API) | 5th |
+| **T0 — API-first routing** | Small-Medium | HIGH — stops computing what's already in the API; adds free pp-change, municipal seats, Valintatieto to existing tools | **1st** |
+| T1 — Consolidation | Medium | HIGH — reduces LLM confusion immediately | 2nd |
+| T2 — Renames and descriptions | Small | HIGH — fixes misleading names that cause bad tool selection | 3rd |
+| T5 — System prompt + README | Small | HIGH — without a system prompt, testing is unreliable | 4th (parallelize with T2) |
+| T3 — Mathematical fixes | Small | MEDIUM — Pedersen normalization is wrong but not user-harmful today | 5th |
+| T4 — ENP + Valintatieto (municipal/regional/EU outcome) | Medium | HIGH political value — ENP; extends outcome coverage beyond parliamentary | 6th |
 | T6 — 14db routing | Small | MEDIUM — unlocks presidential multi-year vaalipiiri | Last |
