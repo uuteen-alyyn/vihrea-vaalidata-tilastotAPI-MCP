@@ -323,16 +323,29 @@ The turnout table for äänestysalue-level data has ~2000 rows. The 500-row cap 
 
 **Recommended:** Add ENP computation to `analyze_party_profile` (and optionally `get_area_profile`) and register it in `explain_metric`.
 
-### 3.4 Missing D'Hondt seat projection
+### 3.4 Election outcome: Valintatieto (no D'Hondt needed)
 
-In Finnish parliamentary elections, seats within each vaalipiiri are allocated by the D'Hondt method. A candidate's seat eligibility depends on:
-1. Their total votes in the vaalipiiri
-2. Their party's D'Hondt divisors relative to other parties
-3. The number of seats allocated to the vaalipiiri (fixed by law, changes rarely)
+**Tilastokeskus already publishes election outcome directly in the API.** No D'Hondt computation is required. The following tables contain `Valintatieto` (election status) data:
 
-Currently no tool tells the LLM whether a candidate won a seat. `analyze_candidate_profile` gives rank_within_party but not the party's seat count. This is a significant political intelligence gap — a candidate who ranked 3rd in a party that won 4 seats is a parliamentarian; the same rank in a party that won 2 seats is not.
+| Election | Table | Field | Values |
+|---|---|---|---|
+| Parliamentary 2023 | `statfin_evaa_pxt_13t3` | `Valintatieto` dimension | SSS=all, 1=Valittu, 2=Varalla, 3=Ei valittu |
+| Municipal 2025 | `statfin_kvaa_pxt_14uk`–`14v8` (per vaalipiiri) | `Tiedot: kvaa_valinta` | 1=valittu, 2=varalla, 3=ei valittu |
+| Regional 2025 | `statfin_alvaa_pxt_14z8`–`14zt` (per hyvinvointialue) | `Tiedot: alvaa_valinta` | 1=valittu, 2=varalla, 3=ei valittu |
+| EU 2024 | `statfin_euvaa_pxt_14gz` | Table contains only elected MEPs | — |
+| Presidential | `statfin_pvaa_pxt_14d5` | No explicit flag — winner implicit from round 2 >50% | — |
 
-**Recommended:** Add a `compute_dHondt` utility to the shared layer, and expose a `seat_projection` output in `analyze_candidate_profile` and `analyze_party_profile`. The seat count per vaalipiiri is fixed by law (`Vaalilaki`) and should be encoded as a static map (unlikely to change — last changed 2012).
+Additionally:
+- **Municipal `14uk`–`14v8`** also contains `kvaa_kunnanvalt` = "Valtuutettu edellisessä valtuustossa" (was candidate a sitting councillor in the previous term: 1=yes, 3=no)
+- **Regional `14z8`–`14zt`** also contains `alvaa_aluevalt` = "Valtuutettu edellisessä aluevaltuustossa" (same for regional council)
+
+The **incumbent flag** is high-value political context: it tells you whether an elected representative is a continuity pick or a new face, and whether a losing candidate was a sitting councillor who was voted out.
+
+**Note on `13t3`:** This table also contains `vluku` (Vertausluku = D'Hondt comparison number) in its Tiedot dimension, meaning the API exposes the actual D'Hondt divisors as data — useful for showing *why* a candidate was elected (their comparison rank across parties), without needing to compute it ourselves.
+
+**Note on parliamentary 2019/2015/2011:** Equivalent outcome tables may exist in `StatFin_Passiivi`. Scan before assuming unavailable — but this is low priority since the current implementation plan focuses on 2023.
+
+**Recommended:** Add `election_outcome` and optionally `incumbent` fields to `analyze_candidate_profile` output by fetching from the appropriate outcome table. See Phase T4 for implementation spec.
 
 ### 3.5 Pearson correlation in `estimate_vote_transfer_proxy`
 
@@ -464,10 +477,11 @@ After the "Data coverage" table, add a "System prompt" section explaining:
 **Add: known limitations section**
 
 Brief honest summary of current gaps:
-- No D'Hondt seat projection (planned)
-- ENP not yet computed as a tool output (planned)
-- Presidential party data not available (individual candidate data only)
-- Regional election candidate data: 2025 only (2022 has no candidate tables)
+- Election outcome (elected/not elected) available for parliamentary 2023, municipal 2025, regional 2025, and EU 2024 via Tilastokeskus Valintatieto data; not yet exposed as a tool output (planned in T4)
+- ENP (Effective Number of Parties) not yet computed as a tool output (planned in T4)
+- Presidential party data not available — only individual candidate vote totals
+- Regional election candidate data: 2025 only (2022 has no candidate tables from Tilastokeskus)
+- Incumbent flag (was candidate a sitting councillor?) available for municipal and regional but not parliamentary
 
 **Fix: HTTP deployment section**
 
@@ -533,16 +547,62 @@ Actions:
 
 **Commit:** `Phase T3: metric corrections — Pedersen normalization, composite score, correlation`
 
-### Phase T4 — ENP and D'Hondt additions (new functionality)
+### Phase T4 — ENP + election outcome from Valintatieto
 
-**Goal:** Add the two most important missing Finnish electoral metrics.
+**Goal:** Add the two most important missing Finnish electoral outputs. Both use existing Tilastokeskus data — no algorithmic computation required.
+
+**4.1 — ENP (Effective Number of Parties)**
+
+Formula: ENP = 1 / Σ(pi²) where pi = party's share of total votes (as fraction, not percentage).
 
 Actions:
-1. **ENP (Effective Number of Parties):** Add `compute_enp(partyRows)` utility. Include in `analyze_party_profile` output as `effective_number_of_parties`. Add entry to `explain_metric` METRIC_REGISTRY.
-2. **D'Hondt seat projection:** Add `computeDHondt(partyVotes, seats)` utility. Encode `SEATS_BY_VAALIPIIRI` static map (2012-present values; law-stable). Expose in `analyze_candidate_profile` as `seat_projection: { seats_available, party_seats_won, candidate_seat_eligible }` for parliamentary elections. Include warning that seat counts are computed from reported final votes — no rounding error.
-3. **Register both in `trace_result_lineage`** and `explain_metric`.
+- Add `computeEnp(partyRows: ElectionRecord[])` utility in `src/data/normalizer.ts`
+  - Filter to `area_level === 'koko_suomi'` rows
+  - Filter out party_total_code rows (SSS / "Yhteensä")
+  - Compute ENP from `vote_share` values (converted to fractions: divide by 100)
+- Expose in `analyze_party_profile` output as `election_enp` (the system-level ENP, not party-specific — this is a property of the full election, not the individual party)
+- Expose in `get_area_profile` as `area_enp` computed from area-level party shares
+- Add to `explain_metric` METRIC_REGISTRY:
+  ```typescript
+  { key: 'enp', name: 'Effective Number of Parties', formula: '1 / Σ(pi²)', unit: 'dimensionless',
+    notes: 'Laakso-Taagepera (1979). Finland typically 5–7 for parliamentary elections.' }
+  ```
 
-**Commit:** `Phase T4: add ENP and D'Hondt seat projection`
+**4.2 — Election outcome from Valintatieto**
+
+Tilastokeskus publishes election outcome (elected / substitute / not elected) directly in the API. No D'Hondt computation needed.
+
+**Data sources:**
+- Parliamentary 2023: `statfin_evaa_pxt_13t3` — `Valintatieto` dimension (SSS/1/2/3). Also contains `vluku` (Vertausluku/D'Hondt comparison number) in Tiedot. **Not yet mapped.**
+- Municipal 2025: `statfin_kvaa_pxt_14uk`–`14v8` — `Tiedot: kvaa_valinta` (1/2/3) and `kvaa_kunnanvalt` (incumbent flag). Per-vaalipiiri tables. **Partially mapped, no outcome field exposed.**
+- Regional 2025: `statfin_alvaa_pxt_14z8`–`14zt` — `Tiedot: alvaa_valinta` (1/2/3) and `alvaa_aluevalt` (incumbent flag). Per-hyvinvointialue tables. **Not mapped.**
+- EU 2024: `statfin_euvaa_pxt_14gz` — table of elected MEPs only. **Not mapped.**
+- Presidential: no flag; winner is implicit (round 2 >50%).
+
+**Implementation approach:**
+
+Add a `loadCandidateOutcome(electionType, year, candidateId)` function that:
+1. Routes to the correct outcome table based on election_type
+2. For parliamentary: queries `13t3` filtered to `Ehdokas=[candidateId]`, reads `Valintatieto` and `vluku`
+3. For municipal: determines which `14uk`–`14v8` table from candidate_id prefix (2-digit vaalipiiri code); queries `Tiedot=[kvaa_valinta, kvaa_kunnanvalt]`
+4. For regional: determines which `14z8`–`14zt` table from candidate_id; queries `Tiedot=[alvaa_valinta, alvaa_aluevalt]`
+5. For EU: queries `14gz` — if candidate appears, they were elected
+6. Returns `{ election_outcome: 'elected' | 'varalla' | 'not_elected' | 'unknown', incumbent: boolean | null, comparison_number: number | null }`
+
+**Expose in `analyze_candidate_profile`:**
+```typescript
+election_outcome: 'elected' | 'varalla' | 'not_elected' | 'unknown',
+incumbent: true | false | null,   // null for election types without incumbent data (parliamentary)
+comparison_number: number | null,  // Vertausluku — only for parliamentary (from 13t3)
+```
+
+**Register tables:** Add `candidate_outcome_national?: string` field to `ElectionTableSet` for the `13t3` / `14gz` pattern. For per-unit outcome tables (municipal, regional), the existing `candidate_by_aanestysalue` record can be reused since the 14uk–14v8 / 14z8–14zt tables cover the same vaalipiiri/hyvinvointialue partitioning.
+
+**Register in `trace_result_lineage`** and add caveats:
+- Parliamentary: `Valintatieto` from 13t3 is Tilastokeskus's official outcome — authoritative, no caveats
+- Incumbent flag: only available for municipal and regional, not parliamentary
+
+**Commit:** `Phase T4: ENP computation + election outcome from Valintatieto`
 
 ### Phase T5 — System prompt and README
 
@@ -552,9 +612,10 @@ Actions:
 1. Write `system_prompt.md` per Section 5 design
 2. Update README per Section 6 plan
 3. Update `get_data_caveats` registry to include:
-   - D'Hondt limitation (seat projection is approximate if there are tied votes)
-   - Pedersen normalization caveat (non-standard)
-   - ENP limitation (computed from votes, not seats)
+   - Election outcome data: `Valintatieto` is the official Tilastokeskus outcome — authoritative for all elections that publish it
+   - Incumbent flag (`kvaa_kunnanvalt` / `alvaa_aluevalt`): only available for municipal and regional, not parliamentary
+   - ENP limitation: computed from votes, not seats; vote-ENP and seat-ENP differ in proportional systems
+   - Pedersen normalization caveat (non-standard — raw period value is the academic standard)
 4. Update BACKLOG: mark Phase 16 (system prompt test) as ready to execute
 
 **Commit:** `Phase T5: system prompt, README updates, caveat registry additions`
@@ -589,5 +650,5 @@ This is the only unrouted registered table. It enables cross-year presidential c
 | T2 — Renames and descriptions | Small | HIGH — fixes misleading names that cause bad tool selection | 2nd |
 | T5 — System prompt + README | Small | HIGH — without a system prompt, testing is unreliable | 3rd (parallelize with T2) |
 | T3 — Mathematical fixes | Small | MEDIUM — Pedersen normalization is wrong but not user-harmful today | 4th |
-| T4 — ENP + D'Hondt | Medium | HIGH political value; medium effort | 5th |
+| T4 — ENP + Valintatieto outcome | Medium | HIGH political value; simpler than originally planned (no D'Hondt needed — data comes from API) | 5th |
 | T6 — 14db routing | Small | MEDIUM — unlocks presidential multi-year vaalipiiri | Last |
