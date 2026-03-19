@@ -1170,3 +1170,21 @@ Extended `resolve_area` and `resolve_entities` to resolve hyvinvointialue names.
 **Usage:** `resolve_area("Pirkanmaa", area_level: "hyvinvointialue")` → `{ area_id: '...', area_name: 'Pirkanmaan hyvinvointialue', area_level: 'hyvinvointialue' }`.
 
 **Build:** clean. **Tests:** 159/159 passed.
+
+## E3: describe_available_data tool — 2026-03-19 09:10:00
+
+Implemented `describe_available_data` — the final remaining phase from `Implementation_plan_dynamic_queries.md`.
+
+**What it does:** Given `election_type`, `year`, and optional `subject_type` ('party' or 'candidate'), returns exactly what data can be fetched, at what area levels, using which tables, and with what caveats. Replaces manual `describe_election` calls for LLM orchestration.
+
+**Implementation:** Added to `src/tools/discovery/index.ts`. The handler:
+1. Looks up the `ElectionTableSet` entry (with `findPartyTableForType` fallback for older years).
+2. For party data: inspects `party_by_kunta`, `party_by_aanestysalue`, multi-year fallback — derives available area levels and notes year-specific table availability.
+3. For candidate data: inspects `candidate_national`, `candidate_by_vaalipiiri`, `candidate_by_aanestysalue`, `candidate_by_aanestysalue_eu`, `candidate_multiyr_vaalipiiri` — notes per-unit-table fan-out requirements and EU candidate_id filter requirement.
+4. Includes `turnout_demographics` availability with dimension list.
+5. Special-cases regional 2022 (no candidate data).
+
+**Files changed:** `src/tools/discovery/index.ts`.
+**Build:** clean. **Tests:** 159/159 passed.
+
+**Implementation plan status:** All phases complete — 0, A1–A6, B1–B3, C2–C5, D2–D3, E3–E4.

@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { ALL_ELECTION_TABLES, findPartyTableForType } from '../../data/election-tables.js';
-import type { AreaLevel } from '../../data/types.js';
+import type { AreaLevel, ElectionType } from '../../data/types.js';
 
 export function registerDiscoveryTools(server: McpServer): void {
 
@@ -156,6 +156,139 @@ export function registerDiscoveryTools(server: McpServer): void {
             caveats,
           }, null, 2),
         }],
+      };
+    }
+  );
+
+  // ── describe_available_data ───────────────────────────────────────────────
+  server.tool(
+    'describe_available_data',
+    'Given an election type, year, and subject type, returns exactly what data can be fetched and at what geographic granularity. Use this before calling query_election_data or get_party_results to avoid 403 errors and understand what area levels are supported.',
+    {
+      election_type: z.enum(['parliamentary', 'municipal', 'eu_parliament', 'presidential', 'regional'])
+        .describe('The type of election.'),
+      year: z.number().describe('The election year.'),
+      subject_type: z.enum(['party', 'candidate']).optional()
+        .describe('Whether you want party or candidate data. Omit to describe both.'),
+    },
+    async ({ election_type, year, subject_type }) => {
+      const elType = election_type as ElectionType;
+      const tables = ALL_ELECTION_TABLES.find((t) => t.election_type === elType && t.year === year);
+      const fallback = findPartyTableForType(elType);
+
+      if (!tables && !fallback) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({
+              error: `No data found for ${election_type} ${year}.`,
+              available_elections: ALL_ELECTION_TABLES.map((t) => ({ election_type: t.election_type, year: t.year })),
+            }),
+          }],
+        };
+      }
+
+      const entry = tables ?? fallback!;
+      const result: Record<string, unknown> = {
+        election_type,
+        year,
+      };
+
+      // ── Party data ───────────────────────────────────────────────────────
+      if (!subject_type || subject_type === 'party') {
+        const partyLevels: string[] = [];
+        const partyCaveats: string[] = [];
+
+        if (entry.party_by_kunta ?? fallback?.party_by_kunta) {
+          partyLevels.push('koko_suomi');
+          if (election_type === 'regional') {
+            partyLevels.push('hyvinvointialue');
+          } else {
+            partyLevels.push('vaalipiiri');
+          }
+          partyLevels.push('kunta');
+        }
+        if (entry.party_by_aanestysalue) {
+          if (!partyLevels.includes('koko_suomi')) partyLevels.push('koko_suomi');
+          partyLevels.push('aanestysalue');
+          partyCaveats.push(
+            `Year-specific äänestysalue table (${entry.party_by_aanestysalue}) available — ` +
+            'use this when fetching all areas at once to avoid 403 cell-count errors.'
+          );
+        }
+        if (!entry.party_by_kunta && fallback?.party_by_kunta) {
+          partyCaveats.push(
+            `Party data served from multi-year table (${fallback.party_by_kunta}) registered on year ${fallback.year}.`
+          );
+        }
+
+        result['party'] = {
+          available: partyLevels.length > 0,
+          area_levels: partyLevels,
+          caveats: partyCaveats,
+        };
+      }
+
+      // ── Candidate data ───────────────────────────────────────────────────
+      if (!subject_type || subject_type === 'candidate') {
+        const candidateLevels: string[] = [];
+        const candidateCaveats: string[] = [];
+
+        if (entry.candidate_national) {
+          candidateLevels.push('koko_suomi');
+          candidateCaveats.push(`National candidate table: ${entry.candidate_national}.`);
+        }
+        if (entry.candidate_by_vaalipiiri) {
+          if (!candidateLevels.includes('koko_suomi')) candidateLevels.push('koko_suomi');
+          candidateLevels.push('vaalipiiri');
+          candidateCaveats.push(`Candidate results by vaalipiiri: ${entry.candidate_by_vaalipiiri}.`);
+        }
+        if (entry.candidate_by_aanestysalue) {
+          const unitType = entry.geographic_unit_type ?? 'vaalipiiri';
+          const unitCount = Object.keys(entry.candidate_by_aanestysalue).length;
+          if (!candidateLevels.includes('koko_suomi')) candidateLevels.push('koko_suomi');
+          candidateLevels.push('aanestysalue');
+          candidateCaveats.push(
+            `Candidate data spread across ${unitCount} per-${unitType} tables. ` +
+            `Use unit_hint to target a single ${unitType} and avoid ${unitCount} parallel API calls.`
+          );
+        }
+        if (entry.candidate_by_aanestysalue_eu) {
+          candidateLevels.push('aanestysalue');
+          candidateCaveats.push(
+            `EU äänestysalue candidate table (${entry.candidate_by_aanestysalue_eu}) requires candidate_id filter — ` +
+            '247 candidates × 2079 areas exceeds cell limit without it.'
+          );
+        }
+        if (entry.candidate_multiyr_vaalipiiri) {
+          if (!candidateLevels.includes('vaalipiiri')) candidateLevels.push('vaalipiiri');
+          candidateCaveats.push(
+            `Multi-year vaalipiiri candidate table (${entry.candidate_multiyr_vaalipiiri}) covers multiple years in one query.`
+          );
+        }
+        if (election_type === 'regional' && year === 2022) {
+          candidateCaveats.push('No candidate-level data for regional 2022. Only party aggregates are available.');
+        }
+
+        result['candidate'] = {
+          available: candidateLevels.length > 0,
+          area_levels: [...new Set(candidateLevels)],
+          caveats: candidateCaveats,
+        };
+      }
+
+      // ── Turnout data ─────────────────────────────────────────────────────
+      if (entry.voter_turnout_by_demographics) {
+        result['turnout_demographics'] = {
+          available: true,
+          dimensions: Object.keys(entry.voter_turnout_by_demographics),
+        };
+      } else {
+        result['turnout_demographics'] = { available: false };
+      }
+
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
       };
     }
   );
