@@ -2,6 +2,25 @@
 
 ---
 
+## PHASE T2: RENAMES AND DESCRIPTION FIXES — 2026-03-21 10:26:38
+
+**Tool renames:**
+- `scrape_candidate_trajectory` → `get_candidate_trajectory` (was misleading — no scraping)
+- `find_exposed_vote_pools` → `find_vote_decline_areas` (more descriptive)
+- `rank_areas_by_party_presence` → `rank_areas_for_party` (shorter, unambiguous)
+- Updated all references: `server.ts`, `audit/index.ts`, `bugs.regression.test.ts`
+
+**Description/behaviour fixes:**
+- `list_elections`: presidential elections now correctly advertise `vaalipiiri`, `kunta`, `aanestysalue` area levels (14d5 covers all; previously only `koko_suomi` appeared)
+- `describe_election`: `candidate_vaalipiirit` field renamed to `candidate_units` (regional elections use hyvinvointialueet, not vaalipiirit); presidential `candidate_national` caveat now correctly describes 14d5 multi-area coverage
+- `compare_areas`: added `cross_level_warning` when area_ids span different area levels (e.g. one kunta + one vaalipiiri)
+- `get_turnout`: 500-row cap raised to 5000; output now includes `total_rows` and `rows_truncated: true/false`; truncation note added when cap is hit
+- `find_area_overperformance`: default `min_votes` changed 10 → 50 (filters noise from tiny polling districts)
+
+**Test results:** 159/159 passed. Build clean.
+
+---
+
 ## PHASE T1: TOOL CONSOLIDATION — 2026-03-21 10:19:45
 
 Completed T1 tool consolidation. Previous session (crashed) had partially done T1; this session finished it.

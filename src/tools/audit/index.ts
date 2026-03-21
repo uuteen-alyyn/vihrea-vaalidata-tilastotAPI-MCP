@@ -99,7 +99,7 @@ const METRIC_REGISTRY: Record<string, {
   },
   composite_score: {
     name: 'Party Presence Composite Score',
-    used_in: ['rank_areas_by_party_presence'],
+    used_in: ['rank_areas_for_party'],
     definition: 'A weighted composite of three independent components scoring a municipality by historical party presence. All components are normalized to [0, 1]. Ranks areas by where the party already has support — not by persuasion opportunity.',
     formula: 'composite = 0.40×c1_current_support + 0.35×c2_trend + 0.25×c3_size',
     unit: 'dimensionless score (0–1)',
@@ -108,7 +108,7 @@ const METRIC_REGISTRY: Record<string, {
       'c2_trend: vote share change since trend_year, normalized. 0.5 if no trend year provided.',
       'c3_size: total votes cast in area relative to the largest area (electorate size, not party vote volume).',
       'Weights are heuristic and not empirically calibrated. Scores are relative to this party\'s own distribution, not cross-party.',
-      'Full component breakdown is returned in every rank_areas_by_party_presence output.',
+      'Full component breakdown is returned in every rank_areas_for_party output.',
     ],
   },
   vote_transfer_proxy: {
@@ -143,7 +143,7 @@ const TABLE_DESCRIPTIONS: Record<string, {
     coverage: 'All parliamentary elections 1983–2023. All municipalities. National, vaalipiiri, and kunta levels.',
     variables: ['Vuosi (year)', 'Sukupuoli (gender — use SSS for total)', 'Puolue (party)', 'Vaalipiiri ja kunta vaalivuonna (area)', 'Tiedot (measures: evaa_aanet votes, evaa_osuus_aanista vote share, etc.)'],
     area_code_format: 'SSS = national total, {vp:02}{kunta:03} e.g. 010091 = Helsinki (VP01 + KU091), {vp:02}0000 = vaalipiiri total',
-    used_by: ['get_party_results', 'get_area_results', 'get_election_results', 'get_rankings', 'analyze_party_profile', 'compare_parties', 'compare_elections', 'find_area_overperformance', 'find_area_underperformance', 'analyze_geographic_concentration', 'analyze_vote_distribution', 'find_exposed_vote_pools', 'estimate_vote_transfer_proxy', 'rank_areas_by_party_presence', 'get_area_profile', 'compare_areas', 'analyze_area_volatility', 'find_strongholds', 'find_weak_zones'],
+    used_by: ['get_party_results', 'get_area_results', 'get_election_results', 'get_rankings', 'analyze_party_profile', 'compare_parties', 'compare_elections', 'find_area_overperformance', 'find_area_underperformance', 'analyze_geographic_concentration', 'analyze_vote_distribution', 'find_vote_decline_areas', 'estimate_vote_transfer_proxy', 'rank_areas_for_party', 'get_area_profile', 'compare_areas', 'analyze_area_volatility', 'find_strongholds', 'find_weak_zones'],
   },
   statfin_evaa_pxt_13sx: {
     table_id: 'statfin_evaa_pxt_13sx',
@@ -189,7 +189,7 @@ const CAVEATS: Record<string, {
   municipality_boundary_changes: {
     id: 'municipality_boundary_changes',
     severity: 'moderate',
-    affects: ['compare_elections', 'analyze_area_volatility', 'find_exposed_vote_pools', 'estimate_vote_transfer_proxy'],
+    affects: ['compare_elections', 'analyze_area_volatility', 'find_vote_decline_areas', 'estimate_vote_transfer_proxy'],
     description: 'Finnish municipality boundaries have changed significantly since 1983 due to mergers and reorganizations. Area codes in 13sw use the boundary definitions as of the election year (vaalivuosi). Comparing the same area_id across elections may include different geographic units.',
     workaround: 'For long-range historical comparisons, focus on stable municipalities or vaalipiiri-level data. Use validate_comparison to check specific pairs.',
   },
@@ -232,7 +232,7 @@ const CAVEATS: Record<string, {
   c2_trend_percentile_scale: {
     id: 'c2_trend_percentile_scale',
     severity: 'moderate',
-    affects: ['rank_areas_by_party_presence'],
+    affects: ['rank_areas_for_party'],
     description: 'The c2_trend component of the composite area score is a percentile rank of vote share change across the actual distribution of changes for the selected party/election pair. All scores are relative — an area scoring c2=0.8 has a larger vote share increase than 80% of scored areas, but the absolute change may be small. c2 does not generalize across different party/election combinations.',
     workaround: 'Inspect trend_change_pp in each area\'s data block for absolute magnitude. Compare across parties with care — percentile rank is relative to each party\'s own distribution.',
   },
@@ -369,7 +369,7 @@ export function registerAuditTools(server: McpServer): void {
           transformations: ['Pedersen index computed per consecutive year pair', 'biggest_gainer / biggest_loser = max/min absolute change'],
           caveats: ['municipality_boundary_changes', 'sss_party_total_row'],
         },
-        rank_areas_by_party_presence: {
+        rank_areas_for_party: {
           source_tables: ['statfin_evaa_pxt_13sw (queried once per reference_year, once per trend_year if provided)'],
           query_filters: ['All parties and areas loaded; filtered to subject party after fetch'],
           normalization: ['normalizePartyByKunta()'],

@@ -153,9 +153,9 @@ export function registerStrategicTools(server: McpServer): void {
     }
   );
 
-  // ── find_exposed_vote_pools ───────────────────────────────────────────────
+  // ── find_vote_decline_areas ───────────────────────────────────────────────
   server.tool(
-    'find_exposed_vote_pools',
+    'find_vote_decline_areas',
     'Identifies areas where a party lost significant vote share between two elections — voters who may be looking for alternatives. Supports all election types.',
     {
       party_id: z.string().describe('The party whose lost votes represent an opportunity.'),
@@ -378,9 +378,9 @@ export function registerStrategicTools(server: McpServer): void {
     }
   );
 
-  // ── rank_areas_by_party_presence ─────────────────────────────────────────
+  // ── rank_areas_for_party ─────────────────────────────────────────
   server.tool(
-    'rank_areas_by_party_presence',
+    'rank_areas_for_party',
     'Ranks municipalities by historical party presence — where the party already has strong support, growing trends, and large vote pools. Useful for GOTV mobilisation and consolidation targeting. NOTE: scores are derived solely from historical vote share data. This tool does not identify persuadable non-supporters, model demographic opportunity, or predict voter transferability. All score components are returned individually for sensitivity checking.',
     {
       party_id: z.string().describe('The party running the campaign (abbreviation or code).'),
@@ -410,7 +410,7 @@ export function registerStrategicTools(server: McpServer): void {
           const r = await loadPartyResults(trend_year, undefined, electionType);
           trendRows = r.rows;
         } catch (err) {
-          console.error(`[rank_areas_by_party_presence] failed to load trend year ${trend_year}:`, err);
+          console.error(`[rank_areas_for_party] failed to load trend year ${trend_year}:`, err);
           trendRows = null;
         }
       }

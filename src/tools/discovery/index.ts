@@ -27,6 +27,12 @@ export function registerDiscoveryTools(server: McpServer): void {
         if (t.candidate_by_aanestysalue || t.turnout_by_aanestysalue) {
           availableAreaLevels.push('aanestysalue');
         }
+        // Presidential candidate_national (14d5) covers vaalipiiri + kunta + äänestysalue
+        if (t.election_type === 'presidential' && t.candidate_national) {
+          for (const lvl of ['vaalipiiri', 'kunta', 'aanestysalue'] as AreaLevel[]) {
+            if (!availableAreaLevels.includes(lvl)) availableAreaLevels.push(lvl);
+          }
+        }
         return {
           election_type: t.election_type,
           year: t.year,
@@ -126,7 +132,10 @@ export function registerDiscoveryTools(server: McpServer): void {
         );
       }
       if (tables.candidate_national) {
-        caveats.push('Candidate data is available as a single national table (no per-vaalipiiri breakdown).');
+        const note = tables.election_type === 'presidential'
+          ? 'Presidential candidate data (14d5) covers all area levels: koko_suomi, vaalipiiri, kunta, äänestysalue — in a single table. Use round parameter to filter by round.'
+          : 'Candidate data is available as a single national table (no per-unit breakdown).';
+        caveats.push(note);
       }
       if (tables.election_type === 'presidential') {
         caveats.push('Presidential elections have two rounds. Use the round parameter (1 or 2) to filter.');
@@ -149,7 +158,7 @@ export function registerDiscoveryTools(server: McpServer): void {
             database: tables.database,
             party_data_available: hasParty,
             candidate_data_available: hasCandidate,
-            candidate_vaalipiirit: tables.candidate_by_aanestysalue
+            candidate_units: tables.candidate_by_aanestysalue
               ? Object.keys(tables.candidate_by_aanestysalue)
               : [],
             candidate_national_table: tables.candidate_national ?? null,

@@ -163,6 +163,9 @@ export function registerRetrievalTools(server: McpServer): void {
         (tiedotVar?.values ?? []).map((v, i) => [v, tiedotVar?.valueTexts[i] ?? v])
       );
 
+      const CAP = 5000;
+      const totalRows = response.data.length;
+      const truncated = totalRows > CAP;
       return {
         content: [{
           type: 'text' as const,
@@ -170,7 +173,10 @@ export function registerRetrievalTools(server: McpServer): void {
             mode: 'data',
             measure_descriptions: measureDescriptions,
             columns: response.columns,
-            data: response.data.slice(0, 500), // cap for large responses
+            data: response.data.slice(0, CAP),
+            total_rows: totalRows,
+            rows_truncated: truncated,
+            ...(truncated ? { truncation_note: `Results capped at ${CAP} rows. ${totalRows - CAP} rows omitted. Filter by area_id to avoid truncation.` } : {}),
             source,
           }, null, 2),
         }],

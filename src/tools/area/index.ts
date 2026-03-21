@@ -230,6 +230,12 @@ export function registerAreaTools(server: McpServer): void {
         return { area_id, area_name: areaName, area_level: areaLevel, total_votes: totalVotes, top_parties: topParties };
       });
 
+      // Warn if area_ids span different area levels — vote shares are not comparable across levels
+      const distinctLevels = [...new Set(areas.flatMap(a => 'area_level' in a ? [a.area_level] : []))];
+      const crossLevelWarning = distinctLevels.length > 1
+        ? `WARNING: area_ids span different area levels (${distinctLevels.join(', ')}). Vote shares are not comparable across levels — a kunta share reflects that municipality only, a vaalipiiri share reflects the whole district.`
+        : null;
+
       // Cross-area party comparison: which party ranks #1 in each area?
       const leading_parties = areas
         .filter(a => !('error' in a) && 'top_parties' in a)
@@ -243,6 +249,7 @@ export function registerAreaTools(server: McpServer): void {
       return mcpText({
         year: resolvedYear,
         election_type: electionType,
+        ...(crossLevelWarning ? { cross_level_warning: crossLevelWarning } : {}),
         areas,
         leading_parties_summary: leading_parties,
         method: { description: 'Party votes from party table. All areas compared at their native level.', source_table: tableId },

@@ -4,7 +4,7 @@
  * compare_across_dimensions: cross-election/cross-area/cross-subject comparisons
  *   with pp-change computation between same-type elections.
  *
- * scrape_candidate_trajectory: cross-election candidate tracking via fuzzy name matching.
+ * get_candidate_trajectory: cross-election candidate tracking via fuzzy name matching.
  */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -300,9 +300,9 @@ export function registerComparisonTools(server: McpServer): void {
     }
   );
 
-  // ── scrape_candidate_trajectory ────────────────────────────────────────────
+  // ── get_candidate_trajectory ────────────────────────────────────────────
   server.tool(
-    'scrape_candidate_trajectory',
+    'get_candidate_trajectory',
     'Find all elections a candidate has appeared in and return their results as a timeline. ' +
     'Uses fuzzy name matching across election-specific candidate tables — candidate IDs are reissued ' +
     'each election so cross-election identity relies on name matching. ' +

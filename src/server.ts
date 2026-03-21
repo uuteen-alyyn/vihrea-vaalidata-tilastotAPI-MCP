@@ -19,10 +19,10 @@ Multi-party proportional representation with open candidate lists: voters vote f
 
 1. **Resolve** — turn names into IDs: \`resolve_candidate\`, \`resolve_party\`, \`resolve_area\`, \`resolve_entities\`
 2. **Retrieve** — get normalized data: \`query_election_data\` (unified — use this first for cross-election queries), \`get_candidate_results\`, \`get_party_results\`, \`get_area_results\`, \`get_election_results\`, \`get_rankings\`, \`get_top_n\`, \`get_turnout\`
-3. **Compare** — cross-election analysis: \`compare_across_dimensions\` (party/candidate across elections/areas/subjects with pp-change), \`scrape_candidate_trajectory\` (candidate career timeline via fuzzy name matching)
+3. **Compare** — cross-election analysis: \`compare_across_dimensions\` (party/candidate across elections/areas/subjects with pp-change), \`get_candidate_trajectory\` (candidate career timeline via fuzzy name matching)
 4. **Analyze** — compute metrics: \`analyze_candidate_profile\`, \`analyze_party_profile\`, \`compare_candidates\`, \`compare_parties\`, \`compare_elections\`, \`find_area_overperformance\`, \`find_area_underperformance\`, \`analyze_geographic_concentration\`, \`analyze_within_party_position\`, \`analyze_vote_distribution\`
 5. **Area** — geographic patterns: \`get_area_profile\`, \`compare_areas\`, \`analyze_area_volatility\`, \`find_strongholds\`, \`find_weak_zones\`
-6. **Strategic** — campaign analytics: \`detect_inactive_high_vote_candidates\`, \`find_exposed_vote_pools\`, \`estimate_vote_transfer_proxy\`, \`rank_areas_by_party_presence\`
+6. **Strategic** — campaign analytics: \`detect_inactive_high_vote_candidates\`, \`find_vote_decline_areas\`, \`estimate_vote_transfer_proxy\`, \`rank_areas_for_party\`
 7. **Discover** — explore available data: \`list_elections\`, \`describe_election\`, \`list_area_levels\`, \`get_area_hierarchy\`
 8. **Audit** — verify methodology: \`explain_metric\`, \`trace_result_lineage\`, \`validate_comparison\`, \`get_data_caveats\`
 
@@ -67,7 +67,7 @@ Do **not reconstruct metrics manually** when MCP tools provide them. Treat MCP o
 \`get_party_results\` (election_type: municipal, year: 2025, area_id: "010091") → \`compare_elections\` KOK municipal 2021→2025
 
 **Regional — area ranking:**
-\`get_party_results\` (election_type: regional, year: 2025) → \`rank_areas_by_party_presence\` SDP
+\`get_party_results\` (election_type: regional, year: 2025) → \`rank_areas_for_party\` SDP
 
 **EU — top candidates:**
 \`get_top_n\` (election_type: eu, year: 2024, n: 10)

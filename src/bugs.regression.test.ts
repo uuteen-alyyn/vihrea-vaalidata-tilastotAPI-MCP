@@ -61,9 +61,9 @@ describe('BUG-2 FIXED: buildPartyAnalysis filters to kunta-only, no double-count
 });
 
 // ─── BUG-3 ────────────────────────────────────────────────────────────────────
-// find_exposed_vote_pools: now uses net_vote_count_change + total_share_points_lost (fixed)
+// find_vote_decline_areas: now uses net_vote_count_change + total_share_points_lost (fixed)
 
-describe('BUG-3 FIXED: find_exposed_vote_pools uses net vote change and share points lost', () => {
+describe('BUG-3 FIXED: find_vote_decline_areas uses net vote change and share points lost', () => {
   const areas = [
     { area_id: '091', votes_year1: 1000, votes_year2: 1100, share_year1: 30.0, share_year2: 28.0 },
     { area_id: '049', votes_year1: 500,  votes_year2: 600,  share_year1: 25.0, share_year2: 22.0 },
@@ -84,9 +84,9 @@ describe('BUG-3 FIXED: find_exposed_vote_pools uses net vote change and share po
 });
 
 // ─── BUG-4 ────────────────────────────────────────────────────────────────────
-// rank_areas_by_party_presence: c4 removed; 3-component model with independent components (fixed)
+// rank_areas_for_party: c4 removed; 3-component model with independent components (fixed)
 
-describe('BUG-4 FIXED: rank_areas_by_party_presence uses 3 independent components', () => {
+describe('BUG-4 FIXED: rank_areas_for_party uses 3 independent components', () => {
   const nationalShare = 0.20;
   const computeC1 = (share: number) => Math.min(1, share / (nationalShare * 2));
   const computeC2 = (_share: number) => 0.5; // neutral trend for test
@@ -185,7 +185,7 @@ describe('BUG-8 FIXED: co-movement requires MIN_TRANSFER_VOTES=50 and 10% gainer
 });
 
 // ─── BUG-9 ────────────────────────────────────────────────────────────────────
-// rank_areas_by_party_presence: c3_size now uses allVotesByArea (total electorate) (fixed)
+// rank_areas_for_party: c3_size now uses allVotesByArea (total electorate) (fixed)
 
 describe('BUG-9 FIXED: c3_size uses total electorate size, not party vote volume', () => {
   const allVotesByArea = new Map<string, number>([

@@ -373,10 +373,10 @@ export function registerAnalyticsTools(server: McpServer): void {
         'For candidates: aanestysalue = raw per-district (default); kunta = aggregate äänestysalue → kunta using parseKuntaCode. ' +
         'Kunta aggregation requires parliamentary, municipal, or presidential election type.'
       ),
-      min_votes: z.number().optional().describe('Minimum votes in an area to include in results. Defaults to 10.'),
+      min_votes: z.number().optional().describe('Minimum votes in an area to include in results. Defaults to 50 (filters noise from tiny polling districts).'),
       direction: z.enum(['over', 'under']).optional().describe("'over' (default) = areas above baseline; 'under' = areas below baseline."),
     },
-    async ({ year, election_type, subject_type, subject_id, unit_key, area_level, min_votes = 10, direction = 'over' }) => {
+    async ({ year, election_type, subject_type, subject_id, unit_key, area_level, min_votes = 50, direction = 'over' }) => {
       const electionType: ElectionType = election_type ?? 'parliamentary';
       if (subject_type === 'party') {
         const areaLvl: AreaLevel = (area_level as AreaLevel | undefined) ?? subnatLevel(electionType);
