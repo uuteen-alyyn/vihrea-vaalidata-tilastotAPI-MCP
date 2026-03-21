@@ -39,6 +39,7 @@ Read these when you need to check data availability, validate a unit key, or und
 - `rank_within_party` indicates intra-party vote ranking only — it does not indicate whether the candidate won a seat
 - `election_outcome` (`elected` / `varalla` / `not_elected`) is available for parliamentary 2023, municipal 2025, and regional 2025; null for EU and presidential
 - Parliamentary 2007/2011 used 15 vaalipiiri (before 2012 boundary reform) — use `list_unit_keys` to get the correct keys
+- **Helsinki ≠ Uusimaa vaalipiiri**: Helsinki is its own vaalipiiri (`helsinki`, unit_key `"helsinki"`). The `uusimaa` vaalipiiri does NOT include Helsinki municipality. Do not include Helsinki results when analyzing Uusimaa vaalipiiri and vice versa.
 
 ## Example question → tool chains
 

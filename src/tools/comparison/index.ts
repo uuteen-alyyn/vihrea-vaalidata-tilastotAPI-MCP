@@ -184,7 +184,7 @@ export function registerComparisonTools(server: McpServer): void {
       ),
       elections: z.array(z.object({
         election_type: z.enum(['parliamentary', 'municipal', 'eu_parliament', 'presidential', 'regional']),
-        year: z.number(),
+        year: z.coerce.number(),
       })).describe(
         'List of elections to include. Order determines table row order. ' +
         'Example: [{"election_type":"parliamentary","year":2019},{"election_type":"parliamentary","year":2023}]'
@@ -306,10 +306,9 @@ export function registerComparisonTools(server: McpServer): void {
     'Find all elections a candidate has appeared in and return their results as a timeline. ' +
     'Uses fuzzy name matching across election-specific candidate tables — candidate IDs are reissued ' +
     'each election so cross-election identity relies on name matching. ' +
-    '\n\nREQUIRED: election_types must be specified — no "search all" shortcut. ' +
-    'Searching all types and years without a filter triggers 100+ API calls (parliamentary alone: ' +
-    '5 years × 13 vaalipiiri fan-out = 65 calls). Specify only the types the candidate is known to ' +
-    'have participated in. ' +
+    '\n\nFor "which elections did X run in" questions: pass all 5 election types — results are cached, so ' +
+    'the first call is slow (~30s) but subsequent calls are instant. ' +
+    'Only narrow election_types when you already know the candidate is exclusively parliamentary or EU etc. ' +
     '\n\nMatching rules: score ≥ 0.95 = confirmed (included automatically). ' +
     'score 0.55–0.95 = ambiguous (returned with flag for LLM review, not included in results). ' +
     'score < 0.55 = not found.',
@@ -323,11 +322,12 @@ export function registerComparisonTools(server: McpServer): void {
         z.enum(['parliamentary', 'municipal', 'eu_parliament', 'presidential', 'regional'])
       ).min(1).describe(
         'Election types to search. Required — must be specified explicitly. ' +
-        'Example: ["parliamentary", "eu_parliament"] to search parl and EU candidate tables. ' +
+        'For "which elections did X run in" questions: pass all 5 types ' +
+        '["parliamentary","municipal","regional","eu_parliament","presidential"]. ' +
         'Available candidate data: parliamentary 2007/2011/2015/2019/2023, ' +
         'municipal 2021/2025, regional 2025, eu_parliament 2019/2024, presidential 2024.'
       ),
-      years: z.array(z.number()).optional().describe(
+      years: z.array(z.coerce.number()).optional().describe(
         'Optional year filter. If omitted, searches all years with candidate data for each type. ' +
         'Example: [2023, 2024] to limit to recent elections only.'
       ),

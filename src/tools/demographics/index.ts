@@ -168,7 +168,7 @@ export function registerDemographicsTools(server: McpServer): void {
       election_type: z.enum(['parliamentary', 'municipal']).describe(
         'Election type. Supported: parliamentary (2011/2015/2019/2023), municipal (2012/2017/2021/2025).'
       ),
-      year: z.number().describe(
+      year: z.coerce.number().describe(
         'Election year. Parliamentary: 2011, 2015, 2019, 2023. Municipal: 2012, 2017, 2021, 2025.'
       ),
       group: z.enum(['eligible_voters', 'candidates', 'elected']).describe(
@@ -224,7 +224,7 @@ export function registerDemographicsTools(server: McpServer): void {
       election_type: z.enum(['parliamentary', 'municipal', 'eu_parliament', 'presidential']).describe(
         'Election type. Valid years: parliamentary=2023, municipal=2025, eu_parliament=2024, presidential=2024.'
       ),
-      year: z.number().describe(
+      year: z.coerce.number().describe(
         'Election year. Must match exactly: parliamentary→2023, municipal→2025, eu_parliament→2024, presidential→2024.'
       ),
       dimension: z.enum(['age_group', 'education', 'income_quintile', 'origin_language', 'activity']).describe(
@@ -238,7 +238,7 @@ export function registerDemographicsTools(server: McpServer): void {
       gender: z.enum(['total', 'male', 'female']).optional().describe(
         'Gender filter. Default: total. When total, analysis mode also shows the largest gender gap.'
       ),
-      round: z.number().optional().describe(
+      round: z.coerce.number().optional().describe(
         'Presidential elections only: 1 = first round (default), 2 = second round (runoff).'
       ),
       output_mode: z.enum(['data', 'analysis']).optional().describe(

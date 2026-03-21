@@ -1496,3 +1496,32 @@ BACKLOG T5 complete.
 
 **Files changed:** `README.md`, `system_prompt.md`, `Logbook.md`.
 **Build:** n/a (documentation only).
+
+---
+
+## BUG FIXES FROM LIVE TESTING — 2026-03-21
+
+Issues found during first live test session. Five problems identified:
+
+**Fix 1 — z.coerce.number() for all numeric parameters**
+LLM was passing year as a string ("2023" instead of 2023), causing validation errors.
+Applied z.coerce.number() to all 58 z.number() occurrences across 8 tool files via sed.
+
+**Fix 2 — get_candidate_trajectory: too conservative election_types guidance**
+LLM only searched parliamentary when user asked "which elections did X run in".
+Rewrote tool description: for "which elections" queries, pass all 5 types. The cache handles it.
+Also updated election_types param description to explicitly say to pass all 5.
+
+**Fix 3 — Helsinki ≠ Uusimaa vaalipiiri**
+LLM included Helsinki results when analyzing Uusimaa vaalipiiri — factually wrong.
+Added explicit note to SYSTEM_PROMPT in server.ts and system_prompt.md.
+
+**Fix 4 — EU äänestysalue per-candidate availability**
+Already documented in describe_available_data; no code change. Noted as behavioral.
+
+**Fix 5 — LLM not pulling historical context**
+LLM only analyzed 2023 for a campaign analysis. Behavioral/system prompt issue — no code change.
+The system prompt already says to check coverage; LLM needs to be prompted to look at trends.
+
+**Files changed:** src/tools/comparison/index.ts, src/tools/{analytics,area,comparison,demographics,discovery,entity-resolution,retrieval,strategic,audit}/index.ts (coerce), src/server.ts, system_prompt.md, Logbook.md.
+**Build:** clean. **Tests:** 159/159 passed.

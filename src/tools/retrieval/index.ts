@@ -40,7 +40,7 @@ export function registerRetrievalTools(server: McpServer): void {
     'get_party_results',
     'Returns party vote results for any Finnish election type and year. Supports parliamentary (1983–2023), municipal (1976–2025), regional (2022–2025), EU parliament (1996–2024), and presidential (2024).',
     {
-      year: z.number().describe('Election year.'),
+      year: z.coerce.number().describe('Election year.'),
       election_type: ELECTION_TYPE_PARAM,
       area_id: z.string().optional().describe(
         'Area code to filter to. Omit for all areas. ' +
@@ -81,7 +81,7 @@ export function registerRetrievalTools(server: McpServer): void {
     'Presidential: use round=1 or round=2 to filter by round. ' +
     'Passing a guessed candidate_id returns empty results without error.',
     {
-      year: z.number().describe('Election year.'),
+      year: z.coerce.number().describe('Election year.'),
       election_type: ELECTION_TYPE_PARAM,
       unit_key: z.string().optional().describe(
         'Geographic unit key. If unsure, call list_unit_keys(election_type, year) first. ' +
@@ -90,7 +90,7 @@ export function registerRetrievalTools(server: McpServer): void {
         'EU/presidential: omit or pass "national".'
       ),
       candidate_id: z.string().optional().describe('Candidate code — must come from resolve_candidate. Do not guess.'),
-      round: z.number().optional().describe('Presidential elections only: 1 = first round, 2 = second round. Omit for all rounds.'),
+      round: z.coerce.number().optional().describe('Presidential elections only: 1 = first round, 2 = second round. Omit for all rounds.'),
       output_mode: z.enum(['data', 'analysis']).optional().describe('data = normalized rows, analysis = summary.'),
     },
     async ({ year, election_type, unit_key, candidate_id, round, output_mode }) => {
@@ -115,7 +115,7 @@ export function registerRetrievalTools(server: McpServer): void {
     'get_turnout',
     'Returns voter turnout statistics for an election.',
     {
-      year: z.number().describe('Election year.'),
+      year: z.coerce.number().describe('Election year.'),
       election_type: ELECTION_TYPE_PARAM,
       area_id: z.string().optional().describe('Area code to filter to. Omit for all areas.'),
     },
@@ -196,7 +196,7 @@ export function registerRetrievalTools(server: McpServer): void {
     'get_area_results',
     'Returns all party results for a specific geographic area. Optionally also fetches candidate results. Supports all election types.',
     {
-      year: z.number().describe('Election year.'),
+      year: z.coerce.number().describe('Election year.'),
       election_type: ELECTION_TYPE_PARAM,
       area_id: z.string().describe(
         'Area code. Parliamentary/municipal: 6-digit (e.g. "010091" Helsinki kunta, "010000" VP01 vaalipiiri, "SSS" national). ' +
@@ -255,12 +255,12 @@ export function registerRetrievalTools(server: McpServer): void {
     'get_rankings',
     'Returns ranked list of parties or candidates within a defined scope. Use limit to get only the top N. Supports all election types.',
     {
-      year: z.number().describe('Election year.'),
+      year: z.coerce.number().describe('Election year.'),
       election_type: ELECTION_TYPE_PARAM,
       subject: z.enum(['parties', 'candidates']).describe('Rank parties or candidates. Also accepts singular forms "party" and "candidate".'),
       area_id: z.string().optional().describe('Area code to rank parties within. Omit for national. Use SSS/national for national party rankings.'),
       unit_key: z.string().optional().describe('For candidate rankings: vaalipiiri/hyvinvointialue key. Required unless EU/presidential.'),
-      limit: z.number().optional().describe('Return only the top N results. Omit for all results.'),
+      limit: z.coerce.number().optional().describe('Return only the top N results. Omit for all results.'),
     },
     async (args) => computeRankings(args)
   );
@@ -287,7 +287,7 @@ export function registerRetrievalTools(server: McpServer): void {
         'One or more election types to query. For cross-election comparisons, pass multiple types. ' +
         'Example: ["parliamentary", "municipal"] compares the same party across both election types.'
       ),
-      years: z.array(z.number()).describe(
+      years: z.array(z.coerce.number()).describe(
         'One or more election years to query. All years are fetched in parallel and merged. ' +
         'Example: [2019, 2023] for two parliamentary elections.'
       ),
@@ -307,7 +307,7 @@ export function registerRetrievalTools(server: McpServer): void {
         'Examples: ["VP01", "VP06"] for Helsinki and Pirkanmaa vaalipiiri; ' +
         '["KU091", "KU837"] for Helsinki and Tampere municipalities.'
       ),
-      round: z.number().optional().describe(
+      round: z.coerce.number().optional().describe(
         'Presidential elections only: 1 = first round, 2 = second round (runoff). Omit for all rounds.'
       ),
       output_mode: z.enum(['rows', 'analysis']).optional().describe(

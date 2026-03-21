@@ -65,9 +65,9 @@ export function registerAreaTools(server: McpServer): void {
     {
       area_id: z.string().describe('Area code. Parliamentary: 6-digit (e.g. "010091" for Helsinki, "SSS" for national). Use resolve_area to find codes.'),
       election_type: ELECTION_TYPE_PARAM,
-      reference_year: z.number().optional().describe('Most recent election year to use. Defaults to 2023 for parliamentary.'),
-      history_years: z.array(z.number()).optional().describe('Additional election years to include in the historical trend.'),
-      top_n: z.number().optional().describe('Number of top parties to show. Defaults to 5.'),
+      reference_year: z.coerce.number().optional().describe('Most recent election year to use. Defaults to 2023 for parliamentary.'),
+      history_years: z.array(z.coerce.number()).optional().describe('Additional election years to include in the historical trend.'),
+      top_n: z.coerce.number().optional().describe('Number of top parties to show. Defaults to 5.'),
     },
     async ({ area_id, election_type, reference_year, history_years, top_n = 5 }) => {
       const electionType: ElectionType = election_type ?? 'parliamentary';
@@ -194,8 +194,8 @@ export function registerAreaTools(server: McpServer): void {
     {
       area_ids: z.array(z.string()).min(2).max(8).describe('List of area codes (2–8). Use resolve_area to find codes.'),
       election_type: ELECTION_TYPE_PARAM,
-      year: z.number().optional().describe('Election year. Defaults to the most recent year for the given election_type.'),
-      top_n: z.number().optional().describe('Number of top parties to show per area. Defaults to 5.'),
+      year: z.coerce.number().optional().describe('Election year. Defaults to the most recent year for the given election_type.'),
+      top_n: z.coerce.number().optional().describe('Number of top parties to show per area. Defaults to 5.'),
     },
     async ({ area_ids, election_type, year, top_n = 5 }) => {
       const electionType: ElectionType = election_type ?? 'parliamentary';
@@ -268,7 +268,7 @@ export function registerAreaTools(server: McpServer): void {
     {
       area_id: z.string().describe('Area code (e.g. "010091" for Helsinki kunta).'),
       election_type: ELECTION_TYPE_PARAM,
-      years: z.array(z.number()).optional().describe('Election years to include. Defaults to the most recent 4 years for the given election_type.'),
+      years: z.array(z.coerce.number()).optional().describe('Election years to include. Defaults to the most recent 4 years for the given election_type.'),
     },
     async ({ area_id, election_type, years }) => {
       const electionType: ElectionType = election_type ?? 'parliamentary';
@@ -377,13 +377,13 @@ export function registerAreaTools(server: McpServer): void {
     'find_strongholds',
     'Finds the strongest or weakest geographic areas for a party or candidate by vote share. direction=\'strongholds\' (default) returns highest-share areas; direction=\'weak_zones\' returns lowest-share areas. Replaces the removed find_weak_zones tool.',
     {
-      year: z.number().describe('Election year.'),
+      year: z.coerce.number().describe('Election year.'),
       election_type: ELECTION_TYPE_PARAM,
       subject_type: z.enum(['party', 'candidate']).describe('Whether to find areas for a party or a candidate.'),
       subject_id: z.string().describe('Party abbreviation (e.g. "KOK") or candidate_id.'),
       unit_key: z.string().optional().describe('Required when subject_type=candidate (vaalipiiri/hyvinvointialue key). Omit for EU/presidential.'),
-      min_votes: z.number().optional().describe('Minimum votes to include an area. Defaults to 10.'),
-      limit: z.number().optional().describe('Number of areas to return. Defaults to 15.'),
+      min_votes: z.coerce.number().optional().describe('Minimum votes to include an area. Defaults to 10.'),
+      limit: z.coerce.number().optional().describe('Number of areas to return. Defaults to 15.'),
       direction: z.enum(['strongholds', 'weak_zones']).optional().describe("'strongholds' (default) = highest vote share areas; 'weak_zones' = lowest vote share areas."),
     },
     async ({ year, election_type, subject_type, subject_id, unit_key, min_votes = 10, limit = 15, direction = 'strongholds' }) => {
@@ -495,9 +495,9 @@ export function registerAreaTools(server: McpServer): void {
       subjects: z.array(z.string()).min(1).max(10).describe('Party IDs to include in the similarity vector (e.g. ["VIHR", "SDP"]). Each subject × election pair becomes one dimension.'),
       elections: z.array(z.object({
         election_type: ELECTION_TYPE_PARAM,
-        year: z.number().describe('Election year.'),
+        year: z.coerce.number().describe('Election year.'),
       })).min(1).max(6).describe('List of elections to use. Each election × subject pair is one dimension of the similarity vector.'),
-      n_results: z.number().int().min(1).max(50).default(10).describe('Number of most-similar municipalities to return (default: 10).'),
+      n_results: z.coerce.number().int().min(1).max(50).default(10).describe('Number of most-similar municipalities to return (default: 10).'),
     },
     async ({ reference_area_id, subjects, elections, n_results }) => {
       // Fan-out: fetch kunta-level party data for all requested elections simultaneously.

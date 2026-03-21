@@ -208,7 +208,7 @@ export function registerEntityResolutionTools(server: McpServer): void {
     'Resolves a fuzzy party name or abbreviation to a canonical party_id usable in other tools. Handles Finnish names, Swedish names, abbreviations, and English equivalents. Falls back to live metadata search if no static match found.',
     {
       query: z.string().max(200).describe('Party name or abbreviation to resolve (e.g. "kokoomus", "KOK", "National Coalition Party", "SDP", "Perussuomalaiset", "True Finns").'),
-      year: z.number().optional().describe('Election year for metadata fallback. Defaults to 2023.'),
+      year: z.coerce.number().optional().describe('Election year for metadata fallback. Defaults to 2023.'),
     },
     async ({ query, year = 2023 }) => {
       const normalized = normalizeStr(query);
@@ -329,7 +329,7 @@ export function registerEntityResolutionTools(server: McpServer): void {
     {
       query: z.string().max(200).describe('Area name to resolve (e.g. "Helsinki", "Helsingfors", "Hki", "Pirkanmaa vaalipiiri", "Tampere", "Uusimaa", "Pirkanmaan hyvinvointialue").'),
       area_level: z.enum(['kunta', 'vaalipiiri', 'koko_suomi', 'hyvinvointialue']).optional().describe('Restrict results to a specific area level. Omit to search all levels (kunta/vaalipiiri/koko_suomi). Use "hyvinvointialue" for regional election areas.'),
-      year: z.number().optional().describe('Election year for area metadata. Defaults to 2023 (parliamentary). Use 2025 for hyvinvointialue.'),
+      year: z.coerce.number().optional().describe('Election year for area metadata. Defaults to 2023 (parliamentary). Use 2025 for hyvinvointialue.'),
     },
     async ({ query, area_level, year = 2023 }) => {
       let areas: AreaEntry[];
@@ -419,7 +419,7 @@ export function registerEntityResolutionTools(server: McpServer): void {
     {
       query: z.string().max(200).describe('Candidate name to search for (full or partial, surname-first or firstname-first). Examples: "Heinäluoma", "Eveliina Heinäluoma", "Heinaluoma Eveliina", "Atte Harjanne".'),
       election_type: z.enum(['parliamentary', 'municipal', 'eu_parliament', 'presidential', 'regional']).describe('Election type. Determines which candidate tables to search.'),
-      year: z.number().describe('Election year (e.g. 2023, 2024, 2025).'),
+      year: z.coerce.number().describe('Election year (e.g. 2023, 2024, 2025).'),
       unit_key: z.string().optional().describe('Vaalipiiri or hyvinvointialue key. If unsure, call list_unit_keys(election_type, year) first to get valid keys. Omit to fan out across all units (slow, ~15s). Ignored for EU parliament and presidential.'),
       party: z.string().optional().describe('Party abbreviation to narrow results (e.g. "SDP", "KOK", "VIHR"). Case-insensitive, optional.'),
     },
@@ -531,7 +531,7 @@ export function registerEntityResolutionTools(server: McpServer): void {
       entities: z.array(z.object({
         entity_type: z.enum(['candidate', 'party', 'area']).describe('Type of entity to resolve.'),
         query: z.string().max(200).describe('Name or label to resolve.'),
-        year: z.number().optional().describe('Election year context. Defaults to 2023.'),
+        year: z.coerce.number().optional().describe('Election year context. Defaults to 2023.'),
         election_type: z.enum(['parliamentary', 'municipal', 'eu_parliament', 'presidential', 'regional']).optional().describe('For candidates: election type. Defaults to parliamentary.'),
         unit_key: z.string().optional().describe('For candidates: vaalipiiri or hyvinvointialue key to limit search scope.'),
         party: z.string().optional().describe('For candidates: party abbreviation to narrow results.'),

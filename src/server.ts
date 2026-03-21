@@ -54,6 +54,8 @@ Do **not reconstruct metrics manually** when MCP tools provide them. Treat MCP o
 
 **area_id** — 6-digit for party/area tables (e.g. \`010091\` = Helsinki kunta, \`SSS\` = national).
 
+**Helsinki ≠ Uusimaa vaalipiiri** — Helsinki is its own vaalipiiri (unit_key \`"helsinki"\`). Uusimaa vaalipiiri (unit_key \`"uusimaa"\`) does NOT include Helsinki. Never combine their results when analyzing one or the other.
+
 **party_id** — canonical abbreviations: KOK, SDP, PS, KESK, VIHR, VAS, RKP, KD, LIIK.
 
 **candidate_id** — numeric string (e.g. \`01010176\`). Always use \`resolve_candidate\` first.

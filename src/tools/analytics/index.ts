@@ -62,7 +62,7 @@ export function registerAnalyticsTools(server: McpServer): void {
     'analyze_candidate_profile',
     'Computes a comprehensive performance profile for a single candidate: total votes, vote share, overall rank in unit, rank within party, share of party vote, strongest and weakest areas, and geographic concentration index.',
     {
-      year: z.number().describe('Election year (e.g. 2023).'),
+      year: z.coerce.number().describe('Election year (e.g. 2023).'),
       election_type: ELECTION_TYPE_PARAM,
       candidate_id: z.string().describe('Candidate code (e.g. "01010176"). Use resolve_candidate if you only have a name.'),
       unit_key: z.string().optional().describe('Geographic unit key. Parliamentary/municipal: vaalipiiri (e.g. "helsinki"). Regional: hyvinvointialue (e.g. "pirkanmaa"). EU/presidential: omit.'),
@@ -179,7 +179,7 @@ export function registerAnalyticsTools(server: McpServer): void {
     'analyze_party_profile',
     'Computes a performance profile for a party in an election: national totals, vote share, strongest and weakest areas, and geographic spread. Supports all election types.',
     {
-      year: z.number().describe('Election year.'),
+      year: z.coerce.number().describe('Election year.'),
       election_type: ELECTION_TYPE_PARAM,
       party_id: z.string().describe('Party abbreviation or code (e.g. "KOK", "SDP"). Use resolve_party if needed.'),
     },
@@ -255,7 +255,7 @@ export function registerAnalyticsTools(server: McpServer): void {
     'compare_candidates',
     'Side-by-side vote comparison for two or more candidates in the same election unit. Returns votes, overall rank, party, and strongest areas for each.',
     {
-      year: z.number().describe('Election year.'),
+      year: z.coerce.number().describe('Election year.'),
       election_type: ELECTION_TYPE_PARAM,
       candidate_ids: z.array(z.string()).min(2).max(10).describe('List of candidate_id values to compare (2–10). Use resolve_candidate to find IDs.'),
       unit_key: z.string().optional().describe('Vaalipiiri (parliamentary/municipal), hyvinvointialue (regional), or omit for EU/presidential.'),
@@ -316,7 +316,7 @@ export function registerAnalyticsTools(server: McpServer): void {
     'compare_parties',
     'Side-by-side vote comparison for two or more parties in an election. Returns national votes, vote share, and rank for each. Supports all election types.',
     {
-      year: z.number().describe('Election year.'),
+      year: z.coerce.number().describe('Election year.'),
       election_type: ELECTION_TYPE_PARAM,
       party_ids: z.array(z.string()).min(2).max(15).describe('List of party_id values to compare (2–15). Use resolve_party to find IDs.'),
       area_id: z.string().optional().describe('Restrict comparison to a specific area. Defaults to national.'),
@@ -371,7 +371,7 @@ export function registerAnalyticsTools(server: McpServer): void {
     'find_area_overperformance',
     'Finds areas where a party or candidate performs above their baseline. Baseline for parties = national vote share. Baseline for candidates = unit-level vote share. Returns areas ranked by overperformance magnitude.',
     {
-      year: z.number().describe('Election year.'),
+      year: z.coerce.number().describe('Election year.'),
       election_type: ELECTION_TYPE_PARAM,
       subject_type: z.enum(['party', 'candidate']).describe('Whether to analyse a party or a candidate.'),
       subject_id: z.string().describe('Party abbreviation (e.g. "KOK") or candidate_id (e.g. "01010176").'),
@@ -382,7 +382,7 @@ export function registerAnalyticsTools(server: McpServer): void {
         'For candidates: aanestysalue = raw per-district (default); kunta = aggregate äänestysalue → kunta using parseKuntaCode. ' +
         'Kunta aggregation requires parliamentary, municipal, or presidential election type.'
       ),
-      min_votes: z.number().optional().describe('Minimum votes in an area to include in results. Defaults to 50 (filters noise from tiny polling districts).'),
+      min_votes: z.coerce.number().optional().describe('Minimum votes in an area to include in results. Defaults to 50 (filters noise from tiny polling districts).'),
       direction: z.enum(['over', 'under']).optional().describe("'over' (default) = areas above baseline; 'under' = areas below baseline."),
     },
     async ({ year, election_type, subject_type, subject_id, unit_key, area_level, min_votes = 50, direction = 'over' }) => {
@@ -584,7 +584,7 @@ export function registerAnalyticsTools(server: McpServer): void {
     use find_area_overperformance with direction='under' instead.
     Original tool description:
     {
-      year: z.number().describe('Election year.'),
+      year: z.coerce.number().describe('Election year.'),
       election_type: ELECTION_TYPE_PARAM,
       subject_type: z.enum(['party', 'candidate']).describe('Whether to analyse a party or a candidate.'),
       subject_id: z.string().describe('Party abbreviation (e.g. "KOK") or candidate_id (e.g. "01010176").'),
@@ -593,7 +593,7 @@ export function registerAnalyticsTools(server: McpServer): void {
         'Geographic level. For parties: filters rows at this level (default = kunta/vaalipiiri/hyvinvointialue by type). ' +
         'For candidates: aanestysalue = raw (default); kunta = aggregate äänestysalue → kunta (parliamentary/municipal/presidential only).'
       ),
-      min_votes: z.number().optional().describe('Minimum votes in area to include. Defaults to 10.'),
+      min_votes: z.coerce.number().optional().describe('Minimum votes in area to include. Defaults to 10.'),
     },
     async ({ year, election_type, subject_type, subject_id, unit_key, area_level, min_votes = 10 }) => {
       const electionType: ElectionType = election_type ?? 'parliamentary';
@@ -755,7 +755,7 @@ export function registerAnalyticsTools(server: McpServer): void {
     'analyze_geographic_concentration',
     'Measures how geographically concentrated a candidate\'s or party\'s vote is. Returns top-N area dependence metrics. A score close to 1 means nearly all votes come from few areas.',
     {
-      year: z.number().describe('Election year.'),
+      year: z.coerce.number().describe('Election year.'),
       election_type: ELECTION_TYPE_PARAM,
       subject_type: z.enum(['party', 'candidate']).describe('Whether to analyse a party or a candidate.'),
       subject_id: z.string().describe('Party abbreviation (e.g. "KOK") or candidate_id.'),

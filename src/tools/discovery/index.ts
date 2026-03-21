@@ -93,7 +93,7 @@ export function registerDiscoveryTools(server: McpServer): void {
     {
       election_type: z.enum(['parliamentary', 'municipal', 'eu_parliament', 'presidential', 'regional'])
         .describe('The type of election.'),
-      year: z.number().describe('The election year.'),
+      year: z.coerce.number().describe('The election year.'),
     },
     async ({ election_type, year }) => {
       const tables = ALL_ELECTION_TABLES.find(
@@ -180,7 +180,7 @@ export function registerDiscoveryTools(server: McpServer): void {
     {
       election_type: z.enum(['parliamentary', 'municipal', 'eu_parliament', 'presidential', 'regional'])
         .describe('The type of election.'),
-      year: z.number().describe('The election year.'),
+      year: z.coerce.number().describe('The election year.'),
       subject_type: z.enum(['party', 'candidate']).optional()
         .describe('Whether you want party or candidate data. Omit to describe both.'),
     },
@@ -344,7 +344,7 @@ export function registerDiscoveryTools(server: McpServer): void {
     {
       election_type: z.enum(['parliamentary', 'municipal', 'eu_parliament', 'presidential', 'regional'])
         .describe('The type of election.'),
-      year: z.number().describe('The election year (e.g. 2023 for parliamentary, 2025 for regional).'),
+      year: z.coerce.number().describe('The election year (e.g. 2023 for parliamentary, 2025 for regional).'),
     },
     async ({ election_type, year }) => {
       const elType = election_type as ElectionType;
@@ -417,7 +417,7 @@ export function registerDiscoveryTools(server: McpServer): void {
     'Use this when you are unsure which tool to call — search for a concept (e.g. "candidate profile", "volatility", "unit key", "turnout") to find relevant tools.',
     {
       query: z.string().max(200).describe('Keyword or phrase to search for (e.g. "candidate profile", "party rankings", "vaalipiiri", "turnout demographics").'),
-      limit: z.number().optional().describe('Maximum number of results to return. Defaults to 5.'),
+      limit: z.coerce.number().optional().describe('Maximum number of results to return. Defaults to 5.'),
     },
     async ({ query, limit = 5 }) => {
       // Access the internal tool registry from the MCP SDK

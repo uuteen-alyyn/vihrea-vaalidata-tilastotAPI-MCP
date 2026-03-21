@@ -30,13 +30,13 @@ export function registerStrategicTools(server: McpServer): void {
     'detect_inactive_high_vote_candidates',
     'Identifies candidates who ran in from_year but did not run in to_year (inactive candidates). Returns their votes, strongest areas, and party — useful for identifying "orphaned" vote pools that may be available for other candidates. Both years must have candidate data in the registry.',
     {
-      from_year: z.number().describe('The reference election year where candidates ran (e.g. 2019).'),
-      to_year: z.number().describe('The comparison election year. Candidates absent in this year are flagged as inactive (e.g. 2023).'),
+      from_year: z.coerce.number().describe('The reference election year where candidates ran (e.g. 2019).'),
+      to_year: z.coerce.number().describe('The comparison election year. Candidates absent in this year are flagged as inactive (e.g. 2023).'),
       election_type: ELECTION_TYPE_PARAM,
       unit_key: z.string().optional().describe('Geographic unit key (vaalipiiri for parliamentary/municipal, hyvinvointialue for regional). Omit for EU/presidential.'),
       party_id: z.string().optional().describe('Filter to candidates from a specific party (abbreviation or code). Omit for all parties.'),
-      min_votes: z.number().optional().describe('Minimum votes in from_year to include in results. Defaults to 100.'),
-      limit: z.number().optional().describe('Maximum number of candidates to return, sorted by votes descending. Defaults to 20.'),
+      min_votes: z.coerce.number().optional().describe('Minimum votes in from_year to include in results. Defaults to 100.'),
+      limit: z.coerce.number().optional().describe('Maximum number of candidates to return, sorted by votes descending. Defaults to 20.'),
     },
     async ({ from_year, to_year, election_type, unit_key, party_id, min_votes = 100, limit = 20 }) => {
       const electionType: ElectionType = election_type ?? 'parliamentary';
@@ -160,11 +160,11 @@ export function registerStrategicTools(server: McpServer): void {
     {
       party_id: z.string().describe('The party whose lost votes represent an opportunity.'),
       election_type: ELECTION_TYPE_PARAM,
-      year1: z.number().describe('The earlier election year (baseline).'),
-      year2: z.number().describe('The later election year (comparison).'),
-      min_vote_loss_pp: z.number().optional().describe('Minimum vote share loss in pp to flag an area. Defaults to 3.'),
-      min_votes_year1: z.number().optional().describe('Minimum votes in year1 to include an area. Defaults to 50.'),
-      limit: z.number().optional().describe('Maximum areas to return. Defaults to 30.'),
+      year1: z.coerce.number().describe('The earlier election year (baseline).'),
+      year2: z.coerce.number().describe('The later election year (comparison).'),
+      min_vote_loss_pp: z.coerce.number().optional().describe('Minimum vote share loss in pp to flag an area. Defaults to 3.'),
+      min_votes_year1: z.coerce.number().optional().describe('Minimum votes in year1 to include an area. Defaults to 50.'),
+      limit: z.coerce.number().optional().describe('Maximum areas to return. Defaults to 30.'),
     },
     async ({ party_id, election_type, year1, year2, min_vote_loss_pp = 3, min_votes_year1 = 50, limit = 30 }) => {
       const electionType: ElectionType = election_type ?? 'parliamentary';
@@ -253,10 +253,10 @@ export function registerStrategicTools(server: McpServer): void {
       losing_party_id: z.string().describe('Party that lost votes between year1 and year2 (the "source" of transferring votes).'),
       gaining_party_id: z.string().describe('Party that gained votes (the potential "destination").'),
       election_type: ELECTION_TYPE_PARAM,
-      year1: z.number().describe('Earlier election year.'),
-      year2: z.number().describe('Later election year.'),
+      year1: z.coerce.number().describe('Earlier election year.'),
+      year2: z.coerce.number().describe('Later election year.'),
       area_id: z.string().optional().describe('Restrict to a specific area. Omit to analyse at sub-national level.'),
-      min_votes: z.number().optional().describe('Minimum votes in year1 to include an area. Defaults to 50.'),
+      min_votes: z.coerce.number().optional().describe('Minimum votes in year1 to include an area. Defaults to 50.'),
     },
     async ({ losing_party_id, gaining_party_id, election_type, year1, year2, area_id, min_votes = 50 }) => {
       const electionType: ElectionType = election_type ?? 'parliamentary';
@@ -404,10 +404,10 @@ export function registerStrategicTools(server: McpServer): void {
     {
       party_id: z.string().describe('The party running the campaign (abbreviation or code).'),
       election_type: ELECTION_TYPE_PARAM,
-      reference_year: z.number().describe('The most recent election year to use as baseline (e.g. 2023).'),
-      trend_year: z.number().optional().describe('Earlier election year for computing trend. If omitted, only static scores are used.'),
-      min_votes: z.number().optional().describe('Minimum party votes in reference_year to include an area. Defaults to 20.'),
-      limit: z.number().optional().describe('Number of top areas to return. Defaults to 25.'),
+      reference_year: z.coerce.number().describe('The most recent election year to use as baseline (e.g. 2023).'),
+      trend_year: z.coerce.number().optional().describe('Earlier election year for computing trend. If omitted, only static scores are used.'),
+      min_votes: z.coerce.number().optional().describe('Minimum party votes in reference_year to include an area. Defaults to 20.'),
+      limit: z.coerce.number().optional().describe('Number of top areas to return. Defaults to 25.'),
     },
     async ({ party_id, election_type, reference_year, trend_year, min_votes = 20, limit = 25 }) => {
       const electionType: ElectionType = election_type ?? 'parliamentary';
