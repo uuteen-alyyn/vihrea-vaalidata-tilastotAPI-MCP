@@ -1349,3 +1349,34 @@ Updated `explain_metric` tool description to advertise `enp` in the known metric
 **Build:** clean. **Tests:** 159/159 passed.
 
 **All T1–T6 phases complete.**
+
+---
+
+## STAGE 3 (Implementation_plan_session_2026-03-21): INDEPENDENT IMPROVEMENTS — 2026-03-21
+
+**Changes implemented:**
+
+**Stage 3A — `list_unit_keys` tool (new):**
+- Added `list_unit_keys(election_type, year)` to `src/tools/discovery/index.ts`.
+- Returns valid vaalipiiri or hyvinvointialue keys for parliamentary/municipal/regional, derived live from the election-tables.ts registry.
+- For EU parliament and presidential: returns `unit_key_required: false` with a note.
+- Solves Problem 1 (unit key validation) and Performance 2 (fan-out) structurally — LLMs can call this before resolve_candidate to avoid guessing or slow fan-out.
+
+**Stage 3B — `searched_all_units` flag in resolve_candidate:**
+- When `unit_key` is omitted, `resolve_candidate` now includes `searched_all_units: true` and a `performance_note` in its response.
+- Factual data field, not a session workaround — informs the caller that fan-out was used and how to avoid it next time.
+
+**Stage 3C — Cache TTL tiers:**
+- Added `electionTtl(year)` helper in `src/data/loaders.ts`.
+- Historical elections (year < current calendar year) → 7-day TTL (configurable via `CACHE_TTL_HISTORICAL_MS` env var).
+- Current year → default 1-hour TTL (existing behavior).
+- Applied to all three `withCache` calls in `loadPartyResults` and `loadCandidateResults`.
+
+**Stage 3D — Tool description dependency statements:**
+- `get_candidate_results`: description now states "Requires candidate_id from resolve_candidate — do not guess" and "If unsure of unit_key, call list_unit_keys first".
+- `resolve_candidate`: description now states "Always call this first — do not guess candidate_id" and directs to `list_unit_keys` when unit_key is unknown.
+- `candidate_id` parameter description: "must come from resolve_candidate. Do not guess."
+- `unit_key` parameter description: updated to point to `list_unit_keys`.
+
+**Files changed:** `src/tools/discovery/index.ts`, `src/tools/entity-resolution/index.ts`, `src/tools/retrieval/index.ts`, `src/data/loaders.ts`, `Logbook.md`.
+**Build:** clean. **Tests:** 159/159 passed.

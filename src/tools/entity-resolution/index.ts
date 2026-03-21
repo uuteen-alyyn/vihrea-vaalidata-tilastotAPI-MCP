@@ -411,17 +411,22 @@ export function registerEntityResolutionTools(server: McpServer): void {
   // ── resolve_candidate ─────────────────────────────────────────────────────
   server.tool(
     'resolve_candidate',
-    'Resolves a fuzzy candidate name to a canonical candidate_id for any Finnish election type. For EU parliament and presidential, all candidates are in a single national table — no unit_key needed. For parliamentary, municipal, and regional elections, providing unit_key (vaalipiiri or hyvinvointialue) speeds up the search; omitting it fans out to all ~13–21 tables in parallel (~15s).',
+    'Resolves a fuzzy candidate name to a canonical candidate_id for any Finnish election type. ' +
+    'Always call this first — do not guess candidate_id. ' +
+    'For EU parliament and presidential, all candidates are in a single national table — no unit_key needed. ' +
+    'For parliamentary, municipal, and regional elections, providing unit_key speeds up the search significantly; omitting it fans out to all ~13–21 tables in parallel (~15s). ' +
+    'If unsure of unit_key, call list_unit_keys(election_type, year) first to get the valid keys.',
     {
       query: z.string().max(200).describe('Candidate name to search for (full or partial, surname-first or firstname-first). Examples: "Heinäluoma", "Eveliina Heinäluoma", "Heinaluoma Eveliina", "Atte Harjanne".'),
       election_type: z.enum(['parliamentary', 'municipal', 'eu_parliament', 'presidential', 'regional']).describe('Election type. Determines which candidate tables to search.'),
       year: z.number().describe('Election year (e.g. 2023, 2024, 2025).'),
-      unit_key: z.string().optional().describe('For parliamentary/municipal: vaalipiiri key (e.g. "helsinki", "pirkanmaa"). For regional: hyvinvointialue key (e.g. "pirkanmaa", "varsinais-suomi"). Ignored for EU parliament and presidential — those use a single national table.'),
+      unit_key: z.string().optional().describe('Vaalipiiri or hyvinvointialue key. If unsure, call list_unit_keys(election_type, year) first to get valid keys. Omit to fan out across all units (slow, ~15s). Ignored for EU parliament and presidential.'),
       party: z.string().optional().describe('Party abbreviation to narrow results (e.g. "SDP", "KOK", "VIHR"). Case-insensitive, optional.'),
     },
     async ({ query, election_type, year, unit_key, party }) => {
       const electionType: ElectionType = election_type;
       let candidates: CandidateEntry[];
+      let searched_all_units = false;
       try {
         const isNationalOnly = electionType === 'eu_parliament' || electionType === 'presidential';
         if (isNationalOnly) {
@@ -430,6 +435,7 @@ export function registerEntityResolutionTools(server: McpServer): void {
           candidates = await getCandidateListForUnit(year, unit_key, electionType);
         } else {
           candidates = await getCandidatesAllUnits(year, electionType);
+          searched_all_units = true;
         }
       } catch (err) {
         return {
@@ -507,6 +513,10 @@ export function registerEntityResolutionTools(server: McpServer): void {
               score: Math.round(c.score * 100) / 100,
             })),
             usage_note: 'Use candidate_id in get_candidate_results. For parliamentary/municipal/regional, use unit_key as the vaalipiiri parameter.',
+            searched_all_units: searched_all_units || undefined,
+            performance_note: searched_all_units
+              ? 'Fan-out search across all units was used (slow). Provide unit_key next time to avoid this. Call list_unit_keys to see valid keys.'
+              : undefined,
           }),
         }],
       };

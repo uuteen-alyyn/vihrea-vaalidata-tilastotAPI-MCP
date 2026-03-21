@@ -31,7 +31,10 @@ export async function getCandidateListForUnit(
     throw new Error(`No per-unit candidate tables for ${electionType} ${year}`);
   }
   const tableId = tables.candidate_by_aanestysalue[unitKey];
-  if (!tableId) throw new Error(`No candidate table for unit '${unitKey}' in ${electionType} ${year}`);
+  if (!tableId) {
+    const validKeys = Object.keys(tables.candidate_by_aanestysalue).join(', ');
+    throw new Error(`No candidate table for unit '${unitKey}' in ${electionType} ${year}. Valid unit keys: ${validKeys}`);
+  }
   const dbPath = getDatabasePath(tables);
   const metadata = await fetchMetadataCached(dbPath, tableId);
   const candidateVar = metadata.variables.find((v) => v.code === 'Ehdokas');

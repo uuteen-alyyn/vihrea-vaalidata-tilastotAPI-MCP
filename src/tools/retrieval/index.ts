@@ -73,19 +73,23 @@ export function registerRetrievalTools(server: McpServer): void {
   server.tool(
     'get_candidate_results',
     'Returns candidate vote results for any Finnish election type. ' +
+    'Requires candidate_id from resolve_candidate — do not guess this value. ' +
+    'If unsure of unit_key, call list_unit_keys first to get valid keys for the election. ' +
     'Parliamentary/municipal: provide unit_key (vaalipiiri, e.g. "helsinki", "uusimaa"). ' +
     'Regional: provide unit_key (hyvinvointialue, e.g. "pirkanmaa", "varsinais-suomi"). ' +
     'EU/presidential: omit unit_key or pass "national" — single national table is used. ' +
-    'Presidential: use round=1 or round=2 to filter by round.',
+    'Presidential: use round=1 or round=2 to filter by round. ' +
+    'Passing a guessed candidate_id returns empty results without error.',
     {
       year: z.number().describe('Election year.'),
       election_type: ELECTION_TYPE_PARAM,
       unit_key: z.string().optional().describe(
-        'Geographic unit key. Parliamentary/municipal: vaalipiiri (e.g. "helsinki", "uusimaa", "pirkanmaa"). ' +
+        'Geographic unit key. If unsure, call list_unit_keys(election_type, year) first. ' +
+        'Parliamentary/municipal: vaalipiiri (e.g. "helsinki", "uusimaa", "pirkanmaa"). ' +
         'Regional: hyvinvointialue (e.g. "varsinais-suomi", "pirkanmaa", "keski-uusimaa"). ' +
         'EU/presidential: omit or pass "national".'
       ),
-      candidate_id: z.string().optional().describe('Candidate code to filter to. Omit to get all candidates.'),
+      candidate_id: z.string().optional().describe('Candidate code — must come from resolve_candidate. Do not guess.'),
       round: z.number().optional().describe('Presidential elections only: 1 = first round, 2 = second round. Omit for all rounds.'),
       output_mode: z.enum(['data', 'analysis']).optional().describe('data = normalized rows, analysis = summary.'),
     },

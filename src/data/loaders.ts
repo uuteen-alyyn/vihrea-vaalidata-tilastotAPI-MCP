@@ -43,6 +43,22 @@ export function filterResponseByYear(response: PxWebResponse, year: number): PxW
   };
 }
 
+/**
+ * Returns the appropriate cache TTL for election data.
+ * Historical elections (year < current calendar year) are immutable — cache for 7 days.
+ * Current year data may still be updated — use the default 1-hour TTL.
+ *
+ * Can be overridden with env CACHE_TTL_HISTORICAL_MS (milliseconds).
+ */
+const HISTORICAL_TTL_MS =
+  process.env.CACHE_TTL_HISTORICAL_MS
+    ? parseInt(process.env.CACHE_TTL_HISTORICAL_MS, 10)
+    : 7 * 24 * 60 * 60 * 1000; // 7 days
+
+function electionTtl(year: number): number | undefined {
+  return year < new Date().getFullYear() ? HISTORICAL_TTL_MS : undefined; // undefined = default (1h)
+}
+
 export interface LoadResult {
   rows: ElectionRecord[];
   tableId: string;
@@ -113,7 +129,8 @@ export async function loadPartyResults(
     const cacheKey = `data:${tableId}:${electionType}:${year}:all`;
 
     const { value: response, cache_hit } = await withCache(cacheKey, () =>
-      pxwebClient.queryTable(dbPath, tableId, query)
+      pxwebClient.queryTable(dbPath, tableId, query),
+      electionTtl(year)
     );
 
     const rows = normalizePartyTable(response, metadata, year, electionType, schema);
@@ -186,7 +203,8 @@ export async function loadPartyResults(
     : `data:${tableId}:${electionType}:${year}:${areaId ?? 'all'}`;
 
   const { value: rawResponse, cache_hit } = await withCache(cacheKey, () =>
-    pxwebClient.queryTable(dbPath, tableId, query)
+    pxwebClient.queryTable(dbPath, tableId, query),
+    electionTtl(year)
   );
 
   // For multi-year tables, slice the cached all-years response down to the
@@ -232,7 +250,10 @@ export async function loadCandidateResults(
     tableId = tables.candidate_national;
   } else if (!isNational && tables.candidate_by_aanestysalue) {
     const found = tables.candidate_by_aanestysalue[unitKey!];
-    if (!found) throw new Error(`Unknown unit key '${unitKey}' for ${electionType} ${year}`);
+    if (!found) {
+      const validKeys = Object.keys(tables.candidate_by_aanestysalue).join(', ');
+      throw new Error(`Unknown unit key '${unitKey}' for ${electionType} ${year}. Valid unit keys: ${validKeys}`);
+    }
     tableId = found;
   } else {
     throw new Error(`No candidate table available for ${electionType} ${year} (unitKey=${unitKey})`);
@@ -301,7 +322,8 @@ export async function loadCandidateResults(
   const cacheKey = `data:${tableId}:${electionType}:${year}:${candidateId ?? 'all'}:${unitKey ?? 'national'}`;
 
   const { value: response, cache_hit } = await withCache(cacheKey, () =>
-    pxwebClient.queryTable(dbPath, tableId, query)
+    pxwebClient.queryTable(dbPath, tableId, query),
+    electionTtl(year)
   );
 
   const rows = normalizeCandidateByAanestysalue(

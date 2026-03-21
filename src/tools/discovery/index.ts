@@ -323,4 +323,81 @@ export function registerDiscoveryTools(server: McpServer): void {
       };
     }
   );
+
+  // ── list_unit_keys ────────────────────────────────────────────────────────
+  server.tool(
+    'list_unit_keys',
+    'Returns the valid unit_key values for a given election type and year. ' +
+    'Call this before resolve_candidate or get_candidate_results whenever you are unsure which unit_key to use. ' +
+    'Parliamentary and municipal elections use vaalipiiri keys (e.g. "helsinki", "uusimaa"). ' +
+    'Regional elections use hyvinvointialue keys (e.g. "pirkanmaa", "varsinais-suomi"). ' +
+    'EU parliament and presidential elections use a single national table — no unit_key needed. ' +
+    'Keys are derived live from the registry and are always up to date.',
+    {
+      election_type: z.enum(['parliamentary', 'municipal', 'eu_parliament', 'presidential', 'regional'])
+        .describe('The type of election.'),
+      year: z.number().describe('The election year (e.g. 2023 for parliamentary, 2025 for regional).'),
+    },
+    async ({ election_type, year }) => {
+      const elType = election_type as ElectionType;
+      const tables = ALL_ELECTION_TABLES.find((t) => t.election_type === elType && t.year === year);
+
+      if (!tables) {
+        const available = ALL_ELECTION_TABLES
+          .filter((t) => t.election_type === elType)
+          .map((t) => t.year);
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({
+              error: `No tables registered for ${election_type} ${year}.`,
+              available_years: available,
+            }),
+          }],
+        };
+      }
+
+      if (elType === 'eu_parliament' || elType === 'presidential') {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({
+              election_type,
+              year,
+              unit_key_required: false,
+              note: `${election_type} elections use a single national candidate table. Pass unit_key="national" or omit it entirely.`,
+            }),
+          }],
+        };
+      }
+
+      if (!tables.candidate_by_aanestysalue) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({
+              error: `No per-unit candidate tables registered for ${election_type} ${year}. Candidate data may not be available.`,
+            }),
+          }],
+        };
+      }
+
+      const unitType = tables.geographic_unit_type ?? (elType === 'regional' ? 'hyvinvointialue' : 'vaalipiiri');
+      const keys = Object.keys(tables.candidate_by_aanestysalue);
+
+      return {
+        content: [{
+          type: 'text' as const,
+          text: JSON.stringify({
+            election_type,
+            year,
+            unit_type: unitType,
+            unit_key_required: true,
+            unit_keys: keys,
+            usage: `Pass one of these as unit_key in resolve_candidate or get_candidate_results.`,
+          }),
+        }],
+      };
+    }
+  );
 }
