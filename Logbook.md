@@ -1449,3 +1449,28 @@ New `search_tools(query, limit)` tool added to `discovery/index.ts`.
 
 **Files changed:** `src/tools/discovery/index.ts`, `src/tools/retrieval/index.ts`, `CLAUDE.md`, `Implementation_plan_session_2026-03-21.md`.
 **Build:** clean. **Tests:** 159/159 passed.
+
+---
+
+## STAGE 5: MCP PROMPTS (analyze_candidate + compare_parties) — 2026-03-21
+
+Registered two parameterized workflow prompts in `src/server.ts`:
+
+**`analyze_candidate` prompt** (args: candidate_name, election_type, year, unit_key?):
+- Step 1: conditionally calls list_unit_keys if unit_key not provided
+- Step 2: resolve_candidate with confirmed args
+- Step 3: get_candidate_results
+- Step 4: analyze_candidate_profile
+- Step 5: formatted presentation with offer to call get_candidate_trajectory
+
+**`compare_parties` prompt** (args: party_ids, election_type, years, focus?):
+- Step 1: read election://coverage if needed
+- Step 2: compare_across_dimensions with all parties × all years
+- Step 3: analyze_party_profile per party for ENP + volatility
+- Step 4: focused presentation (vote_share / volatility / geographic_concentration / enp)
+
+Both use `argsSchema` (Zod shape) as required by the MCP SDK v1.x.
+All Stages 1–6 in Implementation_plan_session_2026-03-21.md are now ✅ complete.
+
+**Files changed:** `src/server.ts`, `Implementation_plan_session_2026-03-21.md`, `Logbook.md`.
+**Build:** clean. **Tests:** 159/159 passed.

@@ -308,7 +308,7 @@ These items have no dependencies on T1 and can be done at any time.
 
 ---
 
-### Stage 5 — System prompt rewrite and MCP Prompts (Partially done 2026-03-21)
+### Stage 5 — System prompt rewrite and MCP Prompts ✅ DONE (2026-03-21)
 **Depends on: Stages 3 and 4 (Resources must exist before the system prompt can point to them)**
 
 **Rewrite `system_prompt.md` as a lean consumer guide:**
@@ -318,8 +318,8 @@ These items have no dependencies on T1 and can be done at any time.
 - [x] Add: how to access Resources, when to use MCP Prompts
 
 **MCP Prompts — workflow templates:**
-- [ ] `analyze_candidate` — resolve → get_candidate_results → analyze_candidate_profile sequence
-- [ ] Consider: `compare_parties_across_elections`, `find_strategic_opportunities`
+- [x] `analyze_candidate` — resolve → get_candidate_results → analyze_candidate_profile sequence
+- [x] `compare_parties` — compare_across_dimensions → analyze_party_profile sequence
 
 ---
 

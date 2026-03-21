@@ -1,4 +1,5 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { z } from 'zod';
 import { registerDiscoveryTools } from './tools/discovery/index.js';
 import { registerEntityResolutionTools } from './tools/entity-resolution/index.js';
 import { registerRetrievalTools } from './tools/retrieval/index.js';
@@ -96,5 +97,102 @@ export function registerAllTools(server: McpServer): void {
         content: { type: 'text' as const, text: SYSTEM_PROMPT },
       }],
     })
+  );
+
+  server.registerPrompt(
+    'analyze_candidate',
+    {
+      title: 'Analyze candidate — full profile workflow',
+      description: 'Step-by-step workflow to look up, retrieve, and analyze a Finnish election candidate. Resolves the candidate name to an ID, fetches their results, and runs a full profile analysis.',
+      argsSchema: {
+        candidate_name: z.string().describe('Full name of the candidate (e.g. "Santeri Leinonen")'),
+        election_type: z.string().describe('Election type: parliamentary, municipal, regional, eu_parliament, presidential'),
+        year: z.string().describe('Election year (e.g. "2023")'),
+        unit_key: z.string().optional().describe('Vaalipiiri or hyvinvointialue key (e.g. "uusimaa"). If unsure, omit and the workflow will look it up.'),
+      },
+    },
+    async ({ candidate_name, election_type, year, unit_key }) => {
+      const name = candidate_name;
+      const electionType = election_type;
+      const unitKeyNote = unit_key
+        ? `Unit key provided: "${unit_key}".`
+        : 'No unit_key provided — call list_unit_keys first to find the correct key.';
+
+      const text = `You are analyzing a Finnish election candidate. Follow these steps in order:
+
+## Step 1 — Find the unit key (skip if already known)
+${unitKeyNote}
+If unit_key is unknown, call: list_unit_keys(election_type="${electionType}", year=${year})
+Pick the correct vaalipiiri or hyvinvointialue key from the result.
+
+## Step 2 — Resolve the candidate
+Call: resolve_candidate(name="${name}", election_type="${electionType}", year=${year}${unit_key ? `, unit_key="${unit_key}"` : ''})
+This returns the confirmed candidate_id and unit_key. Do not proceed without a confirmed candidate_id.
+
+## Step 3 — Retrieve candidate results
+Call: get_candidate_results(year=${year}, election_type="${electionType}", unit_key=<from step 2>, candidate_id=<from step 2>)
+
+## Step 4 — Analyze candidate profile
+Call: analyze_candidate_profile(candidate_id=<from step 2>, election_type="${electionType}", year=${year}, unit_key=<from step 2>)
+
+## Step 5 — Present the analysis
+Report: candidate name, party, vaalipiiri/unit, total votes, vote share, rank within party, share of party vote, geographic concentration (top areas), and any notable observations.
+If the candidate ran in multiple elections, offer to call get_candidate_trajectory for a career timeline.`;
+
+      return {
+        messages: [{
+          role: 'user' as const,
+          content: { type: 'text' as const, text },
+        }],
+      };
+    }
+  );
+
+  server.registerPrompt(
+    'compare_parties',
+    {
+      title: 'Compare parties across elections — workflow',
+      description: 'Workflow to compare two or more parties across elections, years, or geographic areas. Uses compare_across_dimensions and analyze_party_profile.',
+      argsSchema: {
+        party_ids: z.string().describe('Comma-separated party abbreviations (e.g. "SDP,KOK,PS")'),
+        election_type: z.string().describe('Election type: parliamentary, municipal, regional, eu_parliament'),
+        years: z.string().describe('Comma-separated years to compare (e.g. "2015,2019,2023")'),
+        focus: z.string().optional().describe('What to focus on: vote_share, volatility, geographic_concentration, enp'),
+      },
+    },
+    async ({ party_ids, election_type, years, focus }) => {
+      const parties = party_ids;
+      const electionType = election_type;
+      const focusLabel = focus ?? 'vote_share';
+
+      const text = `You are comparing Finnish political parties across elections. Follow these steps:
+
+## Step 1 — Check data availability
+Read election://coverage if unsure whether party data exists for the requested years.
+
+## Step 2 — Cross-election comparison
+Call: compare_across_dimensions(
+  subject_type="party",
+  subject_ids=[${parties.split(',').map((p: string) => `"${p.trim()}"`).join(', ')}],
+  election_type="${electionType}",
+  years=[${years.split(',').map((y: string) => y.trim()).join(', ')}]
+)
+This returns vote shares and pp-changes for all parties across all years.
+
+## Step 3 — Party profiles (run for each party)
+For each party, call: analyze_party_profile(party_id=<party>, election_type="${electionType}", year=<most recent year>)
+This gives ENP, volatility, and geographic concentration for each.
+
+## Step 4 — Present comparison
+Focus: ${focusLabel}
+Report: vote share trend per party (with pp changes), ENP across years, key geographic shifts, and interpretation of the overall competitive dynamics.`;
+
+      return {
+        messages: [{
+          role: 'user' as const,
+          content: { type: 'text' as const, text },
+        }],
+      };
+    }
   );
 }
