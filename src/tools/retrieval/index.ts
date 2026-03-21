@@ -126,7 +126,10 @@ export function registerRetrievalTools(server: McpServer): void {
         return {
           content: [{
             type: 'text' as const,
-            text: JSON.stringify({ error: `No turnout data found for ${electionType} election ${year}.` }),
+            text: JSON.stringify({
+              error: `No turnout data found for ${electionType} election ${year}.`,
+              hint: 'Read election://coverage for full data availability by election type and year.',
+            }),
           }],
         };
       }

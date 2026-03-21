@@ -1434,3 +1434,18 @@ New `search_tools(query, limit)` tool added to `discovery/index.ts`.
 
 **Files changed:** `src/resources/index.ts` (new), `src/server.ts`, `src/tools/discovery/index.ts`, `Logbook.md`.
 **Build:** clean. **Tests:** 159/159 passed. **Active tools:** 40.
+
+---
+
+## PROBLEM 3 FIX: COVERAGE HINTS IN ERROR MESSAGES + LABEL FIX — 2026-03-21
+
+**What was done:**
+- `describe_election` error path: now returns `available_years` filtered to the requested election type and `hint: "Read election://coverage..."` instead of dumping all elections.
+- `describe_available_data` error path: same improvement — filtered years + coverage hint.
+- `list_unit_keys`: "no per-unit candidate tables" error now references `election://coverage`.
+- `get_turnout`: no-data error now includes coverage hint.
+- Fixed `candidate_vaalipiirit` text reference in `describe_election` 2007/2011 caveat → `candidate_units` (matches the actual response field name).
+- CLAUDE.md: added explicit rule to tick implementation plan checkboxes immediately when a task completes.
+
+**Files changed:** `src/tools/discovery/index.ts`, `src/tools/retrieval/index.ts`, `CLAUDE.md`, `Implementation_plan_session_2026-03-21.md`.
+**Build:** clean. **Tests:** 159/159 passed.

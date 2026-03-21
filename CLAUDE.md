@@ -15,6 +15,7 @@ Per project good practices (`CLAUDE CODE_GOOD PRACTICES.md`), always maintain:
 - **Implementation_plan.md** — Step-by-step plan split into phases, each with goals and tests (create before coding)
 - **BACKLOG.md** — Persistent work queue. Check at the start of every session and surface any outstanding items. Add items whenever the user requests work. Remove items only when the user explicitly says the task is done or dropped.
 - **Logbook.md** — Logbook is always priority 1. Write the logbook entry before anything else when completing a phase or significant work unit.
+- **Implementation plan checkboxes** — **Mark `[ ]` → `[x]` immediately when a task is done.** Do not batch updates at the end. Each completed item must be ticked before moving to the next task. If a stage is done, also update its heading and Status line.
 - **Logbook.md** — Append-only activity log. New entries go at the **bottom only**. Never remove existing entries. Each entry format:
   ```
   ## ENTRY DESCRIPTIVE TITLE YYYY-MM-DD HH:MM:SS

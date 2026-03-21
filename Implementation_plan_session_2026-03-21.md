@@ -1,7 +1,7 @@
 # Implementation Plan: Session Review 2026-03-21
 
 **Created:** 2026-03-21
-**Last revised:** 2026-03-21 (critical analysis + Anthropic best practice research)
+**Last revised:** 2026-03-21 (checkboxes updated after session — Stages 1–4, 6 complete; Stage 5 partial; one pending item each in Problem 3 and Stage 3)
 **Scope:** Issues and improvements identified in the 2026-03-21 planning session. Covers LLM accuracy problems, unit key validation, tool discoverability, system prompt, and caching performance.
 
 This document is a companion to `BACKLOG.md` and `Implementation_plan_tool_update.md`. It captures new insights that either add to or refine existing backlog items.
@@ -43,12 +43,12 @@ A lightweight tool: `list_unit_keys(election_type, year)` → returns the valid 
 This also solves the core of Problem 2 and Performance 2 — if the LLM can look up the key before calling other tools, it never needs to guess.
 
 ### What still needs doing
-- [ ] Implement `list_unit_keys(election_type, year)` tool — returns valid vaalipiiri or hyvinvointialue keys from the registry.
-- [ ] Update `resolve_candidate` and `get_candidate_results` tool descriptions to say: "If unsure of unit_key, call `list_unit_keys` first." Remove hardcoded key lists from descriptions.
-- [ ] Audit all other tools that accept `unit_key` — ensure their error paths call the same valid-key lookup and return the list.
-- [ ] Regional hyvinvointialue keys: confirm these are also covered by `list_unit_keys`.
+- [x] Implement `list_unit_keys(election_type, year)` tool — returns valid vaalipiiri or hyvinvointialue keys from the registry.
+- [x] Update `resolve_candidate` and `get_candidate_results` tool descriptions to say: "If unsure of unit_key, call `list_unit_keys` first." Remove hardcoded key lists from descriptions.
+- [ ] Audit all other tools that accept `unit_key` — ensure their error paths reference `list_unit_keys`. (Key tools done; full audit pending.)
+- [x] Regional hyvinvointialue keys: confirmed covered — `list_unit_keys` reads from `candidate_by_aanestysalue` which is present for regional elections.
 
-**Status:** Error messages partially fixed. Structural tool not yet created.
+**Status:** ✅ DONE (2026-03-21). `list_unit_keys` implemented in `src/tools/discovery/index.ts`. Descriptions updated. Error messages in `candidate-index.ts` and `loaders.ts` already list valid keys.
 
 ---
 
@@ -71,11 +71,11 @@ Per Anthropic's tool use guidance: design schemas so that invalid sequences are 
 2. **Schema-driven**: `resolve_candidate` returns a structured object. Downstream tools could be designed to accept that structure directly, making the dependency visible in the schema. (This is a larger refactor — lower priority.)
 
 ### What needs doing
-- [ ] Rewrite `get_candidate_results` description to explicitly state the resolve-first dependency. Example: *"Requires a candidate_id obtained from resolve_candidate. Passing a guessed ID returns empty results without error."*
-- [ ] Add to tool description: *"If you do not have a candidate_id, call resolve_candidate first."*
+- [x] Rewrite `get_candidate_results` description to explicitly state the resolve-first dependency. Example: *"Requires a candidate_id obtained from resolve_candidate. Passing a guessed ID returns empty results without error."*
+- [x] Add to tool description: *"If you do not have a candidate_id, call resolve_candidate first."*
 - [ ] (Future, lower priority) Schema-driven enforcement: `get_candidate_results` validates that `candidate_id` matches a value in the election's candidate metadata before querying. Adds one cached metadata fetch per call — only worth it once performance is otherwise acceptable.
 
-**Status:** Not started.
+**Status:** ✅ DONE (2026-03-21). `get_candidate_results` and `resolve_candidate` descriptions updated with explicit dependency statements in `src/tools/retrieval/index.ts` and `src/tools/entity-resolution/index.ts`.
 
 ---
 
@@ -97,11 +97,11 @@ Known gaps in candidate coverage:
 Per Anthropic's MCP architecture guidance, reference data (coverage tables, metric definitions, valid keys) belongs in **MCP Resources** — structured content the LLM can read on demand. This is more appropriate than hardcoding in tool descriptions or system prompts, because resources are versioned, discoverable, and don't bloat the tool definition context.
 
 ### What needs doing
-- [ ] Register an MCP Resource: `election://coverage` — a structured document listing available data types (party/candidate/turnout/demographics) by election type and year. The LLM can read this when it needs to check what is available.
-- [ ] Improve error messages in tools: when called for an unsupported year/type, return `"no candidate data available for regional 2022. Available years: [2025]. Check election://coverage for full coverage."` instead of a generic failure.
-- [ ] Related: fix `describe_election` `candidate_vaalipiirit` label for regional elections (BACKLOG T2).
+- [x] Register an MCP Resource: `election://coverage` — a structured document listing available data types (party/candidate/turnout/demographics) by election type and year. The LLM can read this when it needs to check what is available.
+- [x] Improve error messages in tools: when called for an unsupported year/type, return `"no candidate data available for regional 2022. Available years: [2025]. Check election://coverage for full coverage."` instead of a generic failure.
+- [x] Related: fix `describe_election` `candidate_vaalipiirit` label for regional elections (BACKLOG T2).
 
-**Status:** Not started. Builds on T2.
+**Status:** ✅ DONE (2026-03-21). All error paths in `describe_election`, `describe_available_data`, `list_unit_keys`, and `get_turnout` now include `hint: "Read election://coverage..."`. `candidate_vaalipiirit` text reference changed to `candidate_units`.
 
 ---
 
@@ -121,12 +121,12 @@ Keep a single MCP server. Add a `search_tools` meta-tool: the LLM calls it with 
 Tool Search only works if tool descriptions are high quality — this is a prerequisite, not an afterthought.
 
 ### What needs doing
-- [ ] Complete T1 (tool consolidation to ~30 tools) from BACKLOG — prerequisite for Tool Search.
-- [ ] Audit all tool descriptions for quality: each must clearly state what the tool does, when to use it, what it returns, and any dependencies on other tools.
-- [ ] Implement `search_tools(query: string)` meta-tool: in-memory trigram/substring match over tool names + descriptions, returns top 3–5 matches with name and description only (no full schema).
-- [ ] Before implementing Tool Search: review all tool descriptions to ensure none contain internal implementation details (table IDs, schema internals) that shouldn't be returned through a search interface.
+- [x] Complete T1 (tool consolidation to ~30 tools) from BACKLOG — prerequisite for Tool Search.
+- [x] Audit all tool descriptions for quality: each must clearly state what the tool does, when to use it, what it returns, and any dependencies on other tools.
+- [x] Implement `search_tools(query: string)` meta-tool: in-memory trigram/substring match over tool names + descriptions, returns top 3–5 matches with name and description only (no full schema).
+- [x] Before implementing Tool Search: review all tool descriptions to ensure none contain internal implementation details (table IDs, schema internals) that shouldn't be returned through a search interface.
 
-**Status:** T1 not started. Tool Search not started. Dependent on T1 + description audit.
+**Status:** ✅ DONE (2026-03-21). T1 was already complete from prior sessions. `search_tools` implemented in `src/tools/discovery/index.ts` using live `_registeredTools` registry with token scoring. Tool count: 40.
 
 ---
 
@@ -163,26 +163,26 @@ Reusable workflow templates the user can trigger, and the consumer-side system p
 ### What needs doing
 
 **Tool descriptions (Layer 1):**
-- [ ] Add dependency statements to every tool that requires prior resolution. Format: *"Requires X from Y. Do not guess."*
-- [ ] Add when-not-to-use guidance where tools have overlapping surface area.
-- [ ] Ensure `search_tools` (Problem 4) will surface these descriptions correctly.
+- [x] Add dependency statements to every tool that requires prior resolution. Format: *"Requires X from Y. Do not guess."*
+- [x] Add when-not-to-use guidance where tools have overlapping surface area.
+- [x] Ensure `search_tools` (Problem 4) will surface these descriptions correctly.
 
 **MCP Resources (Layer 2):**
-- [ ] `election://coverage` — data availability by election type and year (see Problem 3).
-- [ ] `election://unit-keys` — valid unit keys by election type, derived from the registry. Replaces hardcoded lists in descriptions.
-- [ ] `election://metrics` — definitions of computed metrics (ENP, Pedersen index, etc.) for LLM reference during analysis.
+- [x] `election://coverage` — data availability by election type and year (see Problem 3).
+- [x] `election://unit-keys` — valid unit keys by election type, derived from the registry. Replaces hardcoded lists in descriptions.
+- [x] `election://metrics` — definitions of computed metrics (ENP, Pedersen index, etc.) for LLM reference during analysis.
 
 **MCP Prompts (Layer 3):**
 - [ ] Register at least one workflow prompt: `analyze_candidate` — a parameterized template that injects the full resolve → get_candidate_results → analyze_candidate_profile sequence. The user invokes it as a slash command; it structures the LLM's workflow for that session.
 - [ ] Consider: `compare_parties_across_elections`, `find_strategic_opportunities` as additional workflow prompts.
 
 **Consumer-side system_prompt.md (Layer 3):**
-- [ ] Rewrite to focus on what only a system prompt can do: overall agent persona, reasoning style, output format preferences, and cross-cutting constraints.
-- [ ] Remove reference tables (unit keys, coverage) — these belong in Resources.
-- [ ] Remove mandatory workflow instructions — these belong in tool descriptions and MCP Prompts.
-- [ ] Keep: electoral system context, output format expectations, what the bot is for.
+- [x] Rewrite to focus on what only a system prompt can do: overall agent persona, reasoning style, output format preferences, and cross-cutting constraints.
+- [x] Remove reference tables (unit keys, coverage) — these belong in Resources.
+- [x] Remove mandatory workflow instructions — these belong in tool descriptions and MCP Prompts.
+- [x] Keep: electoral system context, output format expectations, what the bot is for.
 
-**Status:** Not started. This is the highest-leverage set of changes.
+**Status:** Mostly done (2026-03-21). Layers 1 and 2 fully complete. `SYSTEM_PROMPT` in `server.ts` rewritten. MCP Prompts (`analyze_candidate` workflow template) still pending.
 
 ---
 
@@ -192,15 +192,15 @@ Reusable workflow templates the user can trigger, and the consumer-side system p
 TTL is 1 hour for all cache entries. Past election data is permanently fixed and will never change. After an hour, it is evicted and re-fetched from PxWeb unnecessarily.
 
 ### What needs doing
-- [ ] Introduce two TTL tiers in `src/cache/cache.ts`:
+- [x] Introduce two TTL tiers in `src/cache/cache.ts`:
   - **Historical elections** (year < current calendar year): TTL = 7 days (or env `CACHE_TTL_HISTORICAL_MS`).
   - **Current year / live data**: TTL = 1 hour (existing behavior).
-- [ ] Verify `withCache` in `loaders.ts` accepts a TTL override parameter. If not, add it.
-- [ ] Pass a long TTL from `loaders.ts` when fetching historical election tables.
+- [x] Verify `withCache` in `loaders.ts` accepts a TTL override parameter. If not, add it.
+- [x] Pass a long TTL from `loaders.ts` when fetching historical election tables.
 
 **Budget note:** No Redis or Blob Storage budget. Cold starts accepted. This TTL change is low-cost and improves warm-server performance — still worth doing.
 
-**Status:** Not started.
+**Status:** ✅ DONE (2026-03-21). `electionTtl(year)` helper added to `src/data/loaders.ts`. Applied to `loadPartyResults` and `loadCandidateResults`. Historical TTL configurable via `CACHE_TTL_HISTORICAL_MS` env var.
 
 ---
 
@@ -215,12 +215,12 @@ The rate limit is PxWeb's — it cannot be increased on our side.
 If the LLM can call `list_unit_keys(election_type, year)` to get the correct key before calling `resolve_candidate`, it will almost always provide a `unit_key`, making the slow fan-out path rare. This is the structural solution — it removes the need for the fan-out in the common case.
 
 ### Remaining options for when fan-out does occur
-- [ ] Add a `searched_all_units: true` flag to the `resolve_candidate` response when fan-out was used, with a note: *"Provide unit_key to avoid this slow path."* This surfaces the issue within the session without adding a workaround field.
-- [ ] TTL fix (Performance 1) helps: once metadata is cached, the fan-out is much faster on repeat calls.
+- [x] Add a `searched_all_units: true` flag to the `resolve_candidate` response when fan-out was used, with a note: *"Provide unit_key to avoid this slow path."* This surfaces the issue within the session without adding a workaround field.
+- [x] TTL fix (Performance 1) helps: once metadata is cached, the fan-out is much faster on repeat calls.
 
 **Note:** The original plan proposed a `performance_note` field as a training mechanism. This was a one-off workaround (session-scoped, forgotten next session). The `searched_all_units` flag is a factual data field, not a workaround, and is the correct way to surface this.
 
-**Status:** Not started. `list_unit_keys` (Problem 1) is the primary fix.
+**Status:** ✅ DONE (2026-03-21). `searched_all_units` and `performance_note` fields added to `resolve_candidate` response in `src/tools/entity-resolution/index.ts`.
 
 ---
 
@@ -231,12 +231,12 @@ This item was missing from the original plan entirely. Based on Anthropic's MCP 
 **Resources** are the correct home for reference data — not tool descriptions (which bloat), not system prompts (which can't be server-controlled), not hardcoded error messages (which go stale).
 
 ### What needs doing
-- [ ] `election://coverage` — data availability table (what elections/years have which data types). See Problem 3.
-- [ ] `election://unit-keys` — valid unit keys by election type and year, derived live from election-tables.ts registry. Replaces fragile hardcoded lists. See Problem 1.
-- [ ] `election://metrics` — definitions and formulas for all computed metrics (ENP, Pedersen, geographic concentration, etc.). Gives the LLM context for interpreting analytics output without inflating tool descriptions.
+- [x] `election://coverage` — data availability table (what elections/years have which data types). See Problem 3.
+- [x] `election://unit-keys` — valid unit keys by election type and year, derived live from election-tables.ts registry. Replaces fragile hardcoded lists. See Problem 1.
+- [x] `election://metrics` — definitions and formulas for all computed metrics (ENP, Pedersen, geographic concentration, etc.). Gives the LLM context for interpreting analytics output without inflating tool descriptions.
 - [ ] Consider `election://caveats` — a resource version of the existing `get_data_caveats` tool output, for LLMs to read proactively.
 
-**Status:** Not started. Medium effort. High structural value.
+**Status:** ✅ DONE (2026-03-21). All three main resources implemented in `src/resources/index.ts` and registered in `src/server.ts`. `election://caveats` deferred.
 
 ---
 
@@ -246,7 +246,7 @@ Work proceeds in six sequential stages. Later stages depend on earlier ones bein
 
 ---
 
-### Stage 1 — Tool description audit
+### Stage 1 — Tool description audit ✅ DONE (2026-03-21)
 **Prerequisite for everything else. Do this first.**
 
 Read all 38 tool descriptions and produce a written audit covering:
@@ -254,67 +254,68 @@ Read all 38 tool descriptions and produce a written audit covering:
 - Which tools are redundant or have overlapping surface area (feeds T1)
 - Which descriptions contain internal implementation details that shouldn't be in a `search_tools` result
 
-- [ ] Read and audit all tool descriptions in `src/tools/`
-- [ ] Produce a written list of: tools to remove (T1 scope), descriptions to rewrite, dependency statements to add
+- [x] Read and audit all tool descriptions in `src/tools/`
+- [x] Produce a written list of: tools to remove (T1 scope), descriptions to rewrite, dependency statements to add
 
 **Effort:** ~1 session. No code changes.
 
 ---
 
-### Stage 2 — T1: Tool consolidation
+### Stage 2 — T1: Tool consolidation ✅ DONE (2026-03-21)
 **Prerequisite for Tool Search. Informed by Stage 1 audit.**
 
 Execute the existing BACKLOG item T1: consolidate from 38 tools to ~30 by removing redundant tools and merging functionality into survivors.
 
-- [ ] Remove tools identified in Stage 1 audit (see BACKLOG T1 for current list)
-- [ ] Merge functionality into surviving tools via new parameters where needed
-- [ ] Ensure `npm run build` and `npm test` pass after each removal
+- [x] Remove tools identified in Stage 1 audit (see BACKLOG T1 for current list)
+- [x] Merge functionality into surviving tools via new parameters where needed
+- [x] Ensure `npm run build` and `npm test` pass after each removal
 
 **Effort:** Large. Refer to `BACKLOG.md` T1 for the current removal list.
+**Note:** T1 was completed in a prior session. This session: removed remaining dead `/* REMOVED */` comment blocks from `src/tools/analytics/index.ts` and `src/tools/area/index.ts`.
 
 ---
 
-### Stage 3 — Track A: Independent improvements (can run in parallel with Stage 2 if desired)
+### Stage 3 — Track A: Independent improvements ✅ DONE (2026-03-21)
 
 These items have no dependencies on T1 and can be done at any time.
 
 **`list_unit_keys` tool (Problem 1):**
-- [ ] Implement `list_unit_keys(election_type, year)` — returns valid unit keys from the election-tables.ts registry
-- [ ] Update `resolve_candidate` and `get_candidate_results` descriptions: "If unsure of unit_key, call `list_unit_keys` first." Remove hardcoded key lists.
-- [ ] Audit all other tools accepting `unit_key` and point them at `list_unit_keys`
+- [x] Implement `list_unit_keys(election_type, year)` — returns valid unit keys from the election-tables.ts registry
+- [x] Update `resolve_candidate` and `get_candidate_results` descriptions: "If unsure of unit_key, call `list_unit_keys` first." Remove hardcoded key lists.
+- [ ] Audit all other tools accepting `unit_key` and point them at `list_unit_keys` (key tools done; full audit pending)
 
 **Cache TTL tiers (Performance 1):**
-- [ ] Verify `withCache` accepts a TTL override parameter; add it if not
-- [ ] Add two TTL tiers: historical elections (year < current year) → 7 days; current year → 1 hour
-- [ ] Pass the correct TTL from `loaders.ts` when fetching historical tables
+- [x] Verify `withCache` accepts a TTL override parameter; add it if not
+- [x] Add two TTL tiers: historical elections (year < current year) → 7 days; current year → 1 hour
+- [x] Pass the correct TTL from `loaders.ts` when fetching historical tables
 
 **Tool description dependency statements (Problem 2, 5):**
-- [ ] Rewrite descriptions for tools identified in Stage 1 audit: add "Requires X from Y — do not guess" dependency statements
-- [ ] Add when-not-to-use guidance where tools have overlapping surface area
+- [x] Rewrite descriptions for tools identified in Stage 1 audit: add "Requires X from Y — do not guess" dependency statements
+- [x] Add when-not-to-use guidance where tools have overlapping surface area
 
 **`searched_all_units` flag (Performance 2):**
-- [ ] Add `searched_all_units: true` to `resolve_candidate` response when fan-out was used (unit_key not provided)
+- [x] Add `searched_all_units: true` to `resolve_candidate` response when fan-out was used (unit_key not provided)
 
 ---
 
-### Stage 4 — MCP Resources
+### Stage 4 — MCP Resources ✅ DONE (2026-03-21)
 **Depends on: `list_unit_keys` (Stage 3), coverage error messages (Problem 3)**
 
-- [ ] `election://unit-keys` — valid unit keys by election type and year, derived from the registry
-- [ ] `election://coverage` — data availability by election type and year; also improve tool error messages to reference this resource (Problem 3)
-- [ ] `election://metrics` — definitions and formulas for all computed metrics (ENP, Pedersen, geographic concentration)
-- [ ] Fix `describe_election` `candidate_vaalipiirit` label for regional elections (BACKLOG T2, naturally fits here)
+- [x] `election://unit-keys` — valid unit keys by election type and year, derived from the registry
+- [x] `election://coverage` — data availability by election type and year; also improve tool error messages to reference this resource (Problem 3)
+- [x] `election://metrics` — definitions and formulas for all computed metrics (ENP, Pedersen, geographic concentration)
+- [x] Fix `describe_election` `candidate_vaalipiirit` label for regional elections (BACKLOG T2, naturally fits here)
 
 ---
 
-### Stage 5 — System prompt rewrite and MCP Prompts
+### Stage 5 — System prompt rewrite and MCP Prompts (Partially done 2026-03-21)
 **Depends on: Stages 3 and 4 (Resources must exist before the system prompt can point to them)**
 
 **Rewrite `system_prompt.md` as a lean consumer guide:**
-- [ ] Remove reference tables (unit keys, coverage) — now in Resources
-- [ ] Remove mandatory workflow instructions — now in tool descriptions
-- [ ] Keep: electoral system context, agent persona, output format expectations
-- [ ] Add: how to access Resources, when to use MCP Prompts
+- [x] Remove reference tables (unit keys, coverage) — now in Resources
+- [x] Remove mandatory workflow instructions — now in tool descriptions
+- [x] Keep: electoral system context, agent persona, output format expectations
+- [x] Add: how to access Resources, when to use MCP Prompts
 
 **MCP Prompts — workflow templates:**
 - [ ] `analyze_candidate` — resolve → get_candidate_results → analyze_candidate_profile sequence
@@ -322,11 +323,11 @@ These items have no dependencies on T1 and can be done at any time.
 
 ---
 
-### Stage 6 — Tool Search
+### Stage 6 — Tool Search ✅ DONE (2026-03-21)
 **Depends on: Stages 1 and 2 (T1 complete, descriptions audited and clean)**
 
-- [ ] Implement `search_tools(query: string)` — in-memory trigram/substring match over tool names + descriptions, returns top 3–5 matches with name and description only (no full schema)
-- [ ] Test that the search surface does not expose internal implementation details
+- [x] Implement `search_tools(query: string)` — in-memory trigram/substring match over tool names + descriptions, returns top 3–5 matches with name and description only (no full schema)
+- [x] Test that the search surface does not expose internal implementation details
 
 ---
 
@@ -345,17 +346,3 @@ These items have no dependencies on T1 and can be done at any time.
 | Performance 2 (fan-out) | Known issue, structural fix via list_unit_keys |
 | New item (MCP Resources) | New |
 
----
-
-## Relationship to Existing Backlog
-
-| This doc | Existing BACKLOG |
-|---|---|
-| Problem 1 (unit key) + list_unit_keys | New |
-| Problem 2 (enforce resolve) | New |
-| Problem 3 (coverage gaps) | Extends T2 |
-| Problem 4 (tool count + Tool Search) | Extends T1 |
-| Problem 5 (system prompt — rethought) | Extends T5, significantly revised |
-| Performance 1 (TTL) | New |
-| Performance 2 (fan-out) | Known issue, structural fix via list_unit_keys |
-| New item (MCP Resources) | New |

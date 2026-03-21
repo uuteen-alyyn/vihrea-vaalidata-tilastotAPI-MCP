@@ -101,12 +101,16 @@ export function registerDiscoveryTools(server: McpServer): void {
       );
 
       if (!tables) {
+        const available = ALL_ELECTION_TABLES
+          .filter((t) => t.election_type === election_type)
+          .map((t) => t.year);
         return {
           content: [{
             type: 'text' as const,
             text: JSON.stringify({
               error: `No data found for ${election_type} election in ${year}.`,
-              available: ALL_ELECTION_TABLES.map((t) => ({ election_type: t.election_type, year: t.year })),
+              available_years: available.length > 0 ? available : 'No data for this election type.',
+              hint: 'Read election://coverage for full data availability by election type and year.',
             }, null, 2),
           }],
         };
@@ -145,7 +149,7 @@ export function registerDiscoveryTools(server: McpServer): void {
           `Finland had 15 vaalipiiri in ${tables.year} (before the 2012 boundary reform). ` +
           'The old districts kymi, etela-savo, pohjois-savo, and pohjois-karjala were later merged ' +
           'into kaakkois-suomi and savo-karjala (2015+). Use the 2011/2007 keys listed in ' +
-          'candidate_vaalipiirit when querying this election.'
+          'candidate_units when querying this election.'
         );
       }
 
@@ -186,12 +190,16 @@ export function registerDiscoveryTools(server: McpServer): void {
       const fallback = findPartyTableForType(elType);
 
       if (!tables && !fallback) {
+        const available = ALL_ELECTION_TABLES
+          .filter((t) => t.election_type === elType)
+          .map((t) => t.year);
         return {
           content: [{
             type: 'text' as const,
             text: JSON.stringify({
               error: `No data found for ${election_type} ${year}.`,
-              available_elections: ALL_ELECTION_TABLES.map((t) => ({ election_type: t.election_type, year: t.year })),
+              available_years: available.length > 0 ? available : 'No data for this election type.',
+              hint: 'Read election://coverage for full data availability by election type and year.',
             }),
           }],
         };
@@ -376,7 +384,8 @@ export function registerDiscoveryTools(server: McpServer): void {
           content: [{
             type: 'text' as const,
             text: JSON.stringify({
-              error: `No per-unit candidate tables registered for ${election_type} ${year}. Candidate data may not be available.`,
+              error: `No candidate data available for ${election_type} ${year}.`,
+              hint: 'Read election://coverage to see which years have candidate data for this election type.',
             }),
           }],
         };
