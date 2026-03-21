@@ -18,7 +18,8 @@
  *     aanestysalue → 14gw (candidate_by_aanestysalue_eu), requires subject_ids
  *     kunta → 14gw filtered to KU### rows (D3), requires subject_ids
  *   presidential:
- *     All area levels in one table (14d5). Filter after load.
+ *     vaalipiiri → 14db (multi-year, 1994–2024): enables cross-year comparisons
+ *     Other area levels → 14d5 (single year, 2024 only): all areas in one table
  */
 
 import { getElectionTables } from './election-tables.js';
@@ -27,6 +28,7 @@ import {
   loadCandidateResults,
   loadEUCandidateByVaalipiiri,
   loadEUCandidateByAanestysalue,
+  loadPresidentialByVaalipiiri,
 } from './loaders.js';
 import { VAALIPIIRI_PREFIX_MAP } from './area-hierarchy.js';
 import type { ElectionRecord, ElectionType, AreaLevel } from './types.js';
@@ -160,7 +162,19 @@ async function fetchCandidateRows(
 
     // ── Presidential ──────────────────────────────────────────────────────────
     if (electionType === 'presidential') {
-      // 14d5 has all area levels (national + vaalipiiri + kunta + äänestysalue)
+      if (area_level === 'vaalipiiri') {
+        // 14db: multi-year vaalipiiri table — covers all presidential years 1994–2024.
+        // Use instead of 14d5 for vaalipiiri queries to support historical years (2018 etc.)
+        // and to benefit from the single multi-year cache.
+        const singleId = subject_ids?.length === 1 ? subject_ids[0] : undefined;
+        const { rows: allRows, tableId } = await loadPresidentialByVaalipiiri(year, singleId);
+        let rows = allRows.filter((r) => r.area_level === 'vaalipiiri');
+        if (subject_ids && subject_ids.length > 1) rows = rows.filter((r) => subject_ids.includes(r.candidate_id!));
+        if (area_ids?.length) rows = rows.filter((r) => area_ids.includes(r.area_id));
+        if (round !== undefined) rows = rows.filter((r) => r.round === round || r.round === undefined);
+        return { rows, table_ids: [tableId] };
+      }
+      // Other area levels (koko_suomi, kunta, aanestysalue): use 14d5 (2024 only)
       const { rows: allRows, tableId } = await loadCandidateResults(
         year, 'national', undefined, 'presidential', round
       );

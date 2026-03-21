@@ -21,6 +21,7 @@ import {
   findPartyTableForType,
   findVoterBackgroundTableForType,
   getDatabasePath,
+  PRESIDENTIAL_TABLES,
 } from './election-tables.js';
 import type { ElectionRecord, ElectionType, VoterBackgroundRow, VoterTurnoutDemographicRow } from './types.js';
 import type { PxWebResponse, PxWebTableMetadata } from '../api/types.js';
@@ -311,6 +312,71 @@ export async function loadCandidateResults(
 }
 
 export type { ElectionRecord };
+
+// ─── Presidential multi-year vaalipiiri loader ────────────────────────────────
+
+/**
+ * Load presidential candidate results by vaalipiiri from the multi-year table (14db).
+ * Covers all presidential elections 1994–2024.
+ *
+ * Uses the same cache-all-years pattern as the party multi-year loaders (13sw etc.):
+ * the full table is fetched and cached once; subsequent calls for other years are
+ * served from cache after year-filtering client-side.
+ *
+ * @param year        Presidential election year (1994, 2000, 2006, 2012, 2018, 2024)
+ * @param candidateId Optional candidate code for a filtered (smaller) query
+ */
+export async function loadPresidentialByVaalipiiri(
+  year: number,
+  candidateId?: string,
+): Promise<CandidateLoadResult> {
+  const tables = PRESIDENTIAL_TABLES.find((t) => t.candidate_multiyr_vaalipiiri);
+  if (!tables?.candidate_multiyr_vaalipiiri) {
+    throw new Error('No presidential candidate_multiyr_vaalipiiri table (14db) registered');
+  }
+  const tableId = tables.candidate_multiyr_vaalipiiri;
+  const dbPath  = getDatabasePath(tables);
+  const metadata = await fetchMetadataCached(dbPath, tableId);
+
+  type FilterItem = { code: string; selection: { filter: 'item' | 'all'; values: string[] } };
+  const filters: FilterItem[] = [];
+
+  // Fetch all years — cache the full multi-year response; filter per-request below
+  filters.push({ code: 'Vaalipiiri', selection: { filter: 'all', values: ['*'] } });
+  filters.push({
+    code: 'Ehdokas',
+    selection: candidateId
+      ? { filter: 'item', values: [candidateId] }
+      : { filter: 'all', values: ['*'] },
+  });
+  // Include Kierros if present (presidential rounds)
+  if (metadata.variables.some((v) => v.code === 'Kierros')) {
+    filters.push({ code: 'Kierros', selection: { filter: 'all', values: ['*'] } });
+  }
+
+  const tiedotVar = metadata.variables.find((v) => v.code === 'Tiedot');
+  const votesCode = tiedotVar?.values.find(
+    (_, i) => (tiedotVar.valueTexts[i] ?? '').toLowerCase().includes('äänimäärä') ||
+              (tiedotVar.valueTexts[i] ?? '').toLowerCase().includes('äänet')
+  ) ?? 'pvaa_aanet';
+  const shareCode = tiedotVar?.values.find(
+    (_, i) => (tiedotVar.valueTexts[i] ?? '').toLowerCase().includes('osuus')
+  ) ?? 'pvaa_osuus_aanista';
+  filters.push({ code: 'Tiedot', selection: { filter: 'item', values: [votesCode, shareCode] } });
+
+  const query = { query: filters, response: { format: 'json' as const } };
+  // Cache key without year — the full multi-year table is cached in one call
+  const cacheKey = `data:${tableId}:presidential:all${candidateId ? `:${candidateId}` : ''}`;
+
+  const { value: rawResponse, cache_hit } = await withCache(cacheKey, () =>
+    pxwebClient.queryTable(dbPath, tableId, query)
+  );
+
+  // Slice to the requested year before normalizing
+  const response = filterResponseByYear(rawResponse, year);
+  const rows = normalizeCandidateByAanestysalue(response, metadata, year, 'presidential');
+  return { rows, tableId, cache_hit, unit_code: 'SSS' };
+}
 
 // ─── EU candidate loaders ─────────────────────────────────────────────────────
 

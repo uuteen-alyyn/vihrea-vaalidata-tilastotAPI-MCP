@@ -1319,3 +1319,33 @@ Updated `explain_metric` tool description to advertise `enp` in the known metric
 **Files changed:** `system_prompt.md` (new), `README.md`, `src/tools/audit/index.ts`, `Logbook.md`.
 **Build:** clean. **Tests:** 159/159 passed.
 **BACKLOG:** Phase 16 (system prompt test in Claude Desktop) is now ready to execute.
+
+## PHASE T6: PRESIDENTIAL MULTI-YEAR VAALIPIIRI ROUTING (14DB) — 2026-03-21 12:00:00
+
+**Goal:** Wire `statfin_pvaa_pxt_14db` into `query_election_data` for presidential + vaalipiiri queries. Enables cross-year presidential candidate vaalipiiri analysis (e.g., "How did Stubb's support in Pirkanmaa change from 2018 to 2024?").
+
+### Changes
+
+**`src/data/loaders.ts`**
+
+- Added import of `PRESIDENTIAL_TABLES` from election-tables.js
+- Added `loadPresidentialByVaalipiiri(year, candidateId?)` function:
+  - Uses `statfin_pvaa_pxt_14db` (multi-year vaalipiiri table, 1994–2024)
+  - Fetches all years at once and caches the full response (same pattern as 13sw/14z7 party loaders)
+  - Filters to the requested year client-side via `filterResponseByYear` before normalizing
+  - Includes `Kierros` in filters if present (normalizer handles round detection)
+  - Cache key: `data:14db:presidential:all` (or `:candidateId` if filtered) — year-agnostic so all year requests share the cache
+
+**`src/data/query-engine.ts`**
+
+- Imported `loadPresidentialByVaalipiiri`
+- Updated presidential routing in `fetchCandidateRows`:
+  - `area_level === 'vaalipiiri'` → use `loadPresidentialByVaalipiiri` (14db): works for 1994–2024
+  - Other area levels → keep using `loadCandidateResults` (14d5): 2024 only, all areas
+- Updated file header comment to document the split routing
+- Round filter applied post-load for vaalipiiri path
+
+**Files changed:** `src/data/loaders.ts`, `src/data/query-engine.ts`, `Logbook.md`.
+**Build:** clean. **Tests:** 159/159 passed.
+
+**All T1–T6 phases complete.**
