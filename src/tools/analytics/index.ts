@@ -108,6 +108,17 @@ export function registerAnalyticsTools(server: McpServer): void {
       const partyTotalVotes = partyVpRows.reduce((s, r) => s + r.votes, 0);
       const shareOfPartyVotePct = partyTotalVotes > 0 ? pct(totalVotes / partyTotalVotes * 100) : null;
 
+      // Within-party position detail (absorbed from analyze_within_party_position)
+      const partyRanked = partyVpRows.map((r, i) => ({
+        candidate_id: r.candidate_id,
+        candidate_name: r.candidate_name,
+        votes: r.votes,
+        rank_within_party: i + 1,
+      }));
+      const rankIdx = rankWithinParty - 1;
+      const candidateAbove = partyRanked[rankIdx - 1] ?? null;
+      const candidateBelow = partyRanked[rankIdx + 1] ?? null;
+
       // äänestysalue rows for geographic analysis
       const aalueRows = candidateRows.filter((r) => r.area_level === 'aanestysalue');
       const strongest = topN(aalueRows, 5).map((r) => ({
@@ -139,6 +150,11 @@ export function registerAnalyticsTools(server: McpServer): void {
         rank_within_party_caveat: RANK_WITHIN_PARTY_CAVEAT,
         total_party_candidates: partyVpRows.length,
         share_of_party_vote_pct: shareOfPartyVotePct,
+        candidate_above_in_party: candidateAbove,
+        candidate_below_in_party: candidateBelow,
+        votes_behind_rank_above: candidateAbove ? candidateAbove.votes - totalVotes : null,
+        votes_ahead_of_rank_below: candidateBelow ? totalVotes - candidateBelow.votes : null,
+        all_party_candidates: partyRanked,
         ...(usingFallbackSum ? { data_warning: 'total_votes reconstructed by summing äänestysalue rows — unit-level aggregate row not found. May be incomplete if not all rows were loaded.' } : {}),
         strongest_areas: strongest,
         weakest_areas: weakest,
@@ -337,80 +353,9 @@ export function registerAnalyticsTools(server: McpServer): void {
     }
   );
 
-  // ── compare_elections ────────────────────────────────────────────────────
-  server.tool(
-    'compare_elections',
-    'Tracks a party across multiple elections of the same type: vote total, vote share, and rank at each election, plus change metrics between consecutive elections.',
-    {
-      party_id: z.string().describe('Party abbreviation or code (e.g. "KOK", "SDP").'),
-      election_type: ELECTION_TYPE_PARAM,
-      years: z.array(z.number()).min(2).max(10).describe('Election years to compare (e.g. [2015, 2019, 2023]).'),
-      area_id: z.string().optional().describe('Area code to compare within. Defaults to national (SSS).'),
-    },
-    async ({ party_id, election_type, years, area_id }) => {
-      const electionType: ElectionType = election_type ?? 'parliamentary';
-      const effectiveArea = area_id ?? 'SSS';
-      const yearResults: Array<{
-        year: number;
-        votes: number | null;
-        vote_share_pct: number | null;
-        _raw_vote_share: number | null;
-        rank: number | null;
-        error?: string;
-      }> = [];
-      const tableIds: string[] = [];
-
-      // _raw_vote_share is kept unrounded for accurate change computation (POL-9/STAT-4)
-      const yearResultsUnsorted = await Promise.all(years.map(async (year) => {
-        try {
-          const { rows, tableId } = await loadPartyResults(year, effectiveArea, electionType);
-          if (!tableIds.includes(tableId)) tableIds.push(tableId);
-          const row = rows.find((r) => matchesParty(r, party_id));
-          const rank = [...rows].sort((a, b) => b.votes - a.votes).findIndex((r) => r.party_id === row?.party_id) + 1;
-          return {
-            year,
-            votes: row?.votes ?? null,
-            vote_share_pct: row?.vote_share ? pct(row.vote_share) : null,
-            _raw_vote_share: row?.vote_share ?? null,
-            rank: row ? (rank || null) : null,
-          };
-        } catch (err) {
-          console.error(`[compare_elections] failed to load year ${year}:`, err);
-          return { year, votes: null, vote_share_pct: null, _raw_vote_share: null, rank: null, error: `No data for ${year}` };
-        }
-      }));
-      yearResults.push(...yearResultsUnsorted.sort((a, b) => a.year - b.year));
-
-      // Compute changes between consecutive years.
-      // POL-9/STAT-4: derive vote_share_change_pp from raw (unrounded) values before rounding
-      // to avoid compounding rounding errors from pct()-rounded inputs.
-      const changes = yearResults.slice(1).map((curr, i) => {
-        const prev = yearResults[i]!;
-        return {
-          from_year: prev.year,
-          to_year: curr.year,
-          vote_change: (curr.votes !== null && prev.votes !== null) ? curr.votes - prev.votes : null,
-          vote_share_change_pp: (curr._raw_vote_share !== null && prev._raw_vote_share !== null)
-            ? round2(curr._raw_vote_share - prev._raw_vote_share)
-            : null,
-          rank_change: (curr.rank !== null && prev.rank !== null) ? prev.rank - curr.rank : null, // positive = improved
-        };
-      });
-
-      return mcpText({
-        party_id,
-        election_type: electionType,
-        area_id: effectiveArea,
-        // Strip internal _raw_vote_share from output
-        by_year: yearResults.map(({ _raw_vote_share: _r, ...rest }) => rest),
-        changes,
-        method: {
-          description: 'Votes and shares from party table. Rank is relative to all parties in the same area per year. vote_share_change_pp = percentage point change. rank_change: positive = moved up (better).',
-          source_tables: tableIds,
-        },
-      });
-    }
-  );
+  // compare_elections REMOVED (T1): subsumed by compare_across_dimensions.
+  // Migration: compare_across_dimensions(subject_type='party', subject_ids=[party_id],
+  //   elections=[{election_type, year}, ...], vary='election', area_level='koko_suomi')
 
   // ── find_area_overperformance ────────────────────────────────────────────
   server.tool(
@@ -429,8 +374,9 @@ export function registerAnalyticsTools(server: McpServer): void {
         'Kunta aggregation requires parliamentary, municipal, or presidential election type.'
       ),
       min_votes: z.number().optional().describe('Minimum votes in an area to include in results. Defaults to 10.'),
+      direction: z.enum(['over', 'under']).optional().describe("'over' (default) = areas above baseline; 'under' = areas below baseline."),
     },
-    async ({ year, election_type, subject_type, subject_id, unit_key, area_level, min_votes = 10 }) => {
+    async ({ year, election_type, subject_type, subject_id, unit_key, area_level, min_votes = 10, direction = 'over' }) => {
       const electionType: ElectionType = election_type ?? 'parliamentary';
       if (subject_type === 'party') {
         const areaLvl: AreaLevel = (area_level as AreaLevel | undefined) ?? subnatLevel(electionType);
@@ -468,6 +414,11 @@ export function registerAnalyticsTools(server: McpServer): void {
           }))
           .sort((a, b) => b.overperformance_pp - a.overperformance_pp);
 
+        const partyAreas = direction === 'under'
+          ? overperf.filter(a => a.overperformance_pp < 0)
+              .map(a => ({ ...a, underperformance_pp: round2(-a.overperformance_pp) }))
+              .sort((a, b) => b.underperformance_pp - a.underperformance_pp)
+          : overperf.filter(a => a.overperformance_pp > 0);
         return mcpText({
           subject_type: 'party',
           subject_id,
@@ -476,9 +427,9 @@ export function registerAnalyticsTools(server: McpServer): void {
           area_level: areaLvl,
           baseline_pct: pct(baseline),
           baseline_description: 'National vote share',
-          overperforming_areas: overperf.filter((a) => a.overperformance_pp > 0),
+          ...(direction === 'under' ? { underperforming_areas: partyAreas } : { overperforming_areas: partyAreas }),
           method: {
-            description: `Baseline = party national vote share. Overperformance = area_vote_share - baseline. ${areaLvl} level only.`,
+            description: `Baseline = party national vote share. ${direction === 'under' ? 'Underperformance = baseline - area_vote_share' : 'Overperformance = area_vote_share - baseline'}. ${areaLvl} level only.`,
             source_table: tableId,
           },
         });
@@ -547,6 +498,11 @@ export function registerAnalyticsTools(server: McpServer): void {
             })
             .sort((a, b) => b.overperformance_pp - a.overperformance_pp);
 
+          const kuntaAreas = direction === 'under'
+            ? overperf.filter(a => a.overperformance_pp < 0)
+                .map(a => ({ ...a, underperformance_pp: round2(-a.overperformance_pp) }))
+                .sort((a, b) => b.underperformance_pp - a.underperformance_pp)
+            : overperf.filter(a => a.overperformance_pp > 0);
           return mcpText({
             subject_type: 'candidate',
             subject_id,
@@ -557,7 +513,7 @@ export function registerAnalyticsTools(server: McpServer): void {
             area_level: 'kunta',
             baseline_pct: pct(baseline),
             baseline_description: 'Candidate vote share at unit (vaalipiiri/hyvinvointialue) level',
-            overperforming_areas: overperf.filter((a) => a.overperformance_pp > 0),
+            ...(direction === 'under' ? { underperforming_areas: kuntaAreas } : { overperforming_areas: kuntaAreas }),
             method: {
               description: 'Baseline = candidate unit-level share. Kunta votes aggregated from äänestysalue via parseKuntaCode. ' +
                            'area_id = 3-digit kunta code. area_name derived from äänestysalue names (best-effort).',
@@ -587,6 +543,11 @@ export function registerAnalyticsTools(server: McpServer): void {
             }))
             .sort((a, b) => b.overperformance_pp - a.overperformance_pp);
 
+          const aalueAreas = direction === 'under'
+            ? overperf.filter(a => a.overperformance_pp < 0)
+                .map(a => ({ ...a, underperformance_pp: round2(-a.overperformance_pp) }))
+                .sort((a, b) => b.underperformance_pp - a.underperformance_pp)
+            : overperf.filter(a => a.overperformance_pp > 0);
           return mcpText({
             subject_type: 'candidate',
             subject_id,
@@ -597,9 +558,9 @@ export function registerAnalyticsTools(server: McpServer): void {
             area_level: 'aanestysalue',
             baseline_pct: pct(baseline),
             baseline_description: 'Candidate vote share at unit level',
-            overperforming_areas: overperf.filter((a) => a.overperformance_pp > 0),
+            ...(direction === 'under' ? { underperforming_areas: aalueAreas } : { overperforming_areas: aalueAreas }),
             method: {
-              description: 'Baseline = candidate vote share in unit aggregate row. Overperformance = äänestysalue_share - baseline.',
+              description: `Baseline = candidate vote share in unit aggregate row. ${direction === 'under' ? 'Underperformance = baseline - äänestysalue_share' : 'Overperformance = äänestysalue_share - baseline'}.`,
               source_table: tableId,
             },
           });
@@ -608,10 +569,11 @@ export function registerAnalyticsTools(server: McpServer): void {
     }
   );
 
-  // ── find_area_underperformance ───────────────────────────────────────────
-  server.tool(
-    'find_area_underperformance',
-    'Finds areas where a party or candidate performs below their baseline. Inverse of find_area_overperformance.',
+  // find_area_underperformance REMOVED (T1): use find_area_overperformance with direction='under'.
+
+  /* DEAD CODE — find_area_underperformance removed (T1)
+    use find_area_overperformance with direction='under' instead.
+    Original tool description:
     {
       year: z.number().describe('Election year.'),
       election_type: ELECTION_TYPE_PARAM,
@@ -777,26 +739,7 @@ export function registerAnalyticsTools(server: McpServer): void {
             }))
             .sort((a, b) => b.underperformance_pp - a.underperformance_pp);
 
-          return mcpText({
-            subject_type: 'candidate',
-            subject_id,
-            candidate_name: vpRow.candidate_name,
-            year,
-            election_type: electionType,
-            unit_key: unit_key ?? 'national',
-            area_level: 'aanestysalue',
-            baseline_pct: pct(baseline),
-            baseline_description: 'Candidate vote share at unit level',
-            underperforming_areas: underperf,
-            method: {
-              description: 'Baseline = candidate vote share in unit aggregate row. Underperformance = baseline - äänestysalue_share.',
-              source_table: tableId,
-            },
-          });
-        }
-      }
-    }
-  );
+  */
 
   // ── analyze_geographic_concentration ────────────────────────────────────
   server.tool(
@@ -826,17 +769,21 @@ export function registerAnalyticsTools(server: McpServer): void {
         if (subnatRows.length === 0) return errResult(`Party "${subject_id}" not found in ${electionType} ${year}.`);
         const conc = concentrationMetrics(subnatRows.map((r) => r.votes));
         const top10 = topN(subnatRows, 10).map((r) => ({ area_name: r.area_name, votes: r.votes }));
+        const totalVotesP = subnatRows.reduce((s, r) => s + r.votes, 0);
+        const hhi = totalVotesP > 0 ? Math.round(subnatRows.reduce((s, r) => s + (r.votes / totalVotesP) ** 2, 0) * 10000) / 10000 : null;
 
         return mcpText({
           subject_type: 'party', subject_id, year, election_type: electionType,
           concentration: conc,
+          hhi,
           [`top_10_${areaLvl}s`]: top10,
           interpretation: {
             top1_share: `${conc.top1_share_pct}% of votes come from the single strongest ${areaLvl}`,
             top3_share: `${conc.top3_share_pct}% of votes come from the top 3 ${areaLvl}s`,
             top10_share: `${conc.top10_share_pct}% of votes come from the top 10 ${areaLvl}s`,
+            hhi: hhi !== null ? `HHI=${hhi} (0=perfectly dispersed, 1=all votes in one area)` : 'n/a',
           },
-          method: { description: `Top-N share concentration using ${areaLvl}-level rows.`, source_table: tableId },
+          method: { description: `Top-N share concentration and HHI (Herfindahl) using ${areaLvl}-level rows.`, source_table: tableId },
         });
 
       } else {
@@ -854,26 +801,32 @@ export function registerAnalyticsTools(server: McpServer): void {
         const vpRow = allRows.find((r) => r.candidate_id === subject_id && (r.area_level === 'vaalipiiri' || r.area_level === 'hyvinvointialue' || r.area_level === 'koko_suomi'));
         const conc = concentrationMetrics(aalueRows.map((r) => r.votes));
         const top10 = topN(aalueRows, 10).map((r) => ({ area_name: r.area_name, votes: r.votes }));
+        const totalVotesC = aalueRows.reduce((s, r) => s + r.votes, 0);
+        const hhiC = totalVotesC > 0 ? Math.round(aalueRows.reduce((s, r) => s + (r.votes / totalVotesC) ** 2, 0) * 10000) / 10000 : null;
 
         return mcpText({
           subject_type: 'candidate', subject_id,
           candidate_name: vpRow?.candidate_name,
           year, election_type: electionType, unit_key: unit_key ?? 'national',
           concentration: conc,
+          hhi: hhiC,
           top_10_aanestysalueet: top10,
           interpretation: {
             top1_share: `${conc.top1_share_pct}% of votes come from the single strongest äänestysalue`,
             top3_share: `${conc.top3_share_pct}% of votes come from the top 3 äänestysalueet`,
             top10_share: `${conc.top10_share_pct}% of votes come from the top 10 äänestysalueet`,
+            hhi: hhiC !== null ? `HHI=${hhiC} (0=perfectly dispersed, 1=all votes in one äänestysalue)` : 'n/a',
           },
-          method: { description: 'Top-N share concentration using äänestysalue-level rows to avoid double-counting.', source_table: tableId },
+          method: { description: 'Top-N share concentration and HHI (Herfindahl) using äänestysalue-level rows to avoid double-counting.', source_table: tableId },
         });
       }
     }
   );
 
-  // ── analyze_within_party_position ────────────────────────────────────────
-  server.tool(
+  // analyze_within_party_position REMOVED (T1): fields absorbed into analyze_candidate_profile.
+  // (candidate_above_in_party, candidate_below_in_party, votes_behind/ahead, all_party_candidates now in profile)
+
+  /* REMOVED
     'analyze_within_party_position',
     'Analyses a candidate\'s position within their party: rank among party candidates, share of party vote, votes above/below adjacent candidates.',
     {
@@ -943,10 +896,12 @@ export function registerAnalyticsTools(server: McpServer): void {
         },
       });
     }
-  );
+  // END REMOVED
+  */
 
-  // ── analyze_vote_distribution ────────────────────────────────────────────
-  server.tool(
+  // analyze_vote_distribution REMOVED (T1): overlapped with analyze_geographic_concentration.
+  // HHI added to analyze_geographic_concentration. Mean/median/histogram dropped.
+  /*
     'analyze_vote_distribution',
     'Analyses how a party\'s or candidate\'s votes are distributed across geographic areas: mean, median, standard deviation, min, max, and a histogram.',
     {
@@ -1041,140 +996,11 @@ export function registerAnalyticsTools(server: McpServer): void {
         },
       });
     }
-  );
+  */
 
-  // ── compare_across_elections ─────────────────────────────────────────────
-  server.tool(
-    'compare_across_elections',
-    'Compares a party\'s national vote share and total across multiple election types and years in a single response. Useful for tracking a party\'s trajectory across parliamentary, municipal, regional, and EU elections. Includes comparability caveats because electorates and election rules differ across types.',
-    {
-      party: z.string().max(200).describe(
-        'Party abbreviation or name to look up (e.g. "SDP", "KOK", "Perussuomalaiset"). ' +
-        'Matched against party_id and party_name in each election.'
-      ),
-      elections: z.array(
-        z.object({
-          election_type: z.enum(['parliamentary', 'municipal', 'eu_parliament', 'regional']),
-          year: z.number().int().min(1983).max(2030),
-        })
-      ).min(2).max(10).describe(
-        'List of election type + year pairs to compare. ' +
-        'Example: [{"election_type":"parliamentary","year":2023},{"election_type":"municipal","year":2021}]. ' +
-        'Presidential elections are excluded — no party dimension exists in presidential data.'
-      ),
-    },
-    async ({ party, elections }) => {
-      const tableIds: string[] = [];
+  // compare_across_elections REMOVED (T1): subsumed by compare_across_dimensions.
+  // Migration: compare_across_dimensions(subject_type='party', subject_ids=[party_id],
+  //   elections=[...], vary='election', area_level='koko_suomi')
 
-      const results = await Promise.all(elections.map(async ({ election_type, year }) => {
-        try {
-          const { rows, tableId } = await loadPartyResults(year, 'SSS', election_type as ElectionType);
-          if (!tableIds.includes(tableId)) tableIds.push(tableId);
-
-          // Find national total row for this party
-          const row = rows.find((r) => matchesParty(r, party));
-          if (!row) {
-            return {
-              election_type,
-              year,
-              votes: null,
-              vote_share_pct: null,
-              party_id: null,
-              party_name: null,
-              error: `Party "${party}" not found in ${election_type} ${year}`,
-            };
-          }
-
-          // Find total national votes (all parties combined — sum SSS row if present, else sum all party rows)
-          const nationalTotal = rows.reduce((s, r) => s + r.votes, 0);
-
-          return {
-            election_type,
-            year,
-            votes: row.votes,
-            vote_share_pct: row.vote_share ? pct(row.vote_share) : pct((row.votes / nationalTotal) * 100),
-            party_id: row.party_id,
-            party_name: row.party_name,
-          };
-        } catch (err) {
-          console.error(`[compare_across_elections] failed for ${election_type} ${year}:`, err);
-          return {
-            election_type,
-            year,
-            votes: null,
-            vote_share_pct: null,
-            party_id: null,
-            party_name: null,
-            error: `Data unavailable for ${election_type} ${year}`,
-          };
-        }
-      }));
-
-      // Sort by year ascending, then by election_type for same-year entries
-      results.sort((a, b) => a.year !== b.year ? a.year - b.year : a.election_type.localeCompare(b.election_type));
-
-      // Comparability notes per election type
-      const comparabilityNotes: Record<string, string> = {
-        parliamentary: 'National electorate: all Finnish citizens aged 18+. Vote share = % of all valid votes cast nationally.',
-        municipal:     'National electorate: all Finnish citizens + permanent residents aged 18+. Vote share = % of all valid municipal votes cast nationally (sum across all municipalities).',
-        regional:      'National electorate: all Finnish citizens + permanent residents aged 18+ (same as municipal). Covers 21 hyvinvointialue.',
-        eu_parliament: 'Electorate: Finnish citizens + EU citizens residing in Finland. Non-Finnish EU citizens may vote here instead of their home country. Slightly different denominator from other election types.',
-      };
-
-      const uniqueTypes = [...new Set(results.map((r) => r.election_type))];
-      const caveats: string[] = [];
-      if (uniqueTypes.length > 1) {
-        caveats.push(
-          'Cross-election-type vote shares are NOT directly comparable. ' +
-          'Each election type has different eligibility rules, different total electorates, ' +
-          'and different party dynamics. Treat this as indicative trend data, not a strict apples-to-apples comparison.'
-        );
-      }
-      if (uniqueTypes.includes('eu_parliament')) {
-        // POL-13: expanded EU caveat with turnout ratio and second-order election reference
-        caveats.push(
-          'EU Parliament elections are second-order elections (Reif & Schmitt 1980): Finnish EU turnout ' +
-          'is typically ~40% vs ~70–75% in parliamentary elections. The EU electorate is self-selected ' +
-          '— lower-salience voters disproportionately abstain. EU vote shares and trends are structurally ' +
-          'incomparable to national elections. Additionally, non-Finnish EU citizens residing in Finland ' +
-          'may vote here rather than in their home country, slightly changing the eligible electorate.'
-        );
-      }
-      if (uniqueTypes.includes('municipal')) {
-        // POL-14: quantified municipal electorate caveat
-        caveats.push(
-          'Municipal elections allow all permanent residents aged 18+ to vote — including non-citizens ' +
-          '(unlike parliamentary elections which require Finnish citizenship). This expands the eligible ' +
-          'electorate by roughly 2–3% of eligible voters nationally. Vote shares are not directly ' +
-          'comparable between municipal and parliamentary elections for parties with different support ' +
-          'profiles among non-citizen residents. Municipal vote share also sums across all municipalities; ' +
-          'parties without candidates everywhere will have lower national shares.'
-        );
-      }
-      if (uniqueTypes.includes('eu_parliament') && uniqueTypes.includes('municipal')) {
-        caveats.push(
-          'This comparison includes both EU and municipal elections alongside parliamentary elections. ' +
-          'All three have different electorates and dynamics — treat trends as directional indicators only.'
-        );
-      }
-
-      return mcpText({
-        party_query: party,
-        // POL-6: caveats appear before results so LLM consumers see warnings first
-        caveats,
-        comparability_notes: Object.fromEntries(
-          uniqueTypes.map((t) => [t, comparabilityNotes[t] ?? ''])
-        ),
-        results,
-        method: {
-          description:
-            'National vote totals and shares loaded from each election\'s party-by-kunta table ' +
-            'at the national (SSS) level. vote_share_pct taken from the table\'s own share column when ' +
-            'available, otherwise computed as votes / sum_of_all_party_votes × 100.',
-          source_tables: tableIds,
-        },
-      });
-    }
-  );
 
 }

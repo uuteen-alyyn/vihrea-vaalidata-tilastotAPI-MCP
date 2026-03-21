@@ -2,6 +2,31 @@
 
 ---
 
+## PHASE T1: TOOL CONSOLIDATION — 2026-03-21 10:19:45
+
+Completed T1 tool consolidation. Previous session (crashed) had partially done T1; this session finished it.
+
+**Work done in crashed session (already in working tree, not committed):**
+- `compare_elections` removed (subsumed by `compare_across_dimensions`)
+- `compare_across_elections` removed (subsumed by `compare_across_dimensions`)
+- `get_election_results` removed; `area_level` filter param added to `get_party_results`
+- `get_top_n` removed; `limit` param added to `get_rankings`
+- `find_comparable_areas` new tool added to `src/tools/area/index.ts`
+
+**Work done this session:**
+- `find_area_underperformance` removed → `find_area_overperformance` gains `direction: 'over'|'under'` param (default `'over'`). When `'under'`, returns `underperforming_areas` with `underperformance_pp` field, sorted by magnitude descending.
+- `find_weak_zones` removed → `find_strongholds` gains `direction: 'strongholds'|'weak_zones'` param (default `'strongholds'`). When `'weak_zones'`, sorts ascending by vote share and returns `weak_zones` key.
+- `analyze_within_party_position` removed → `analyze_candidate_profile` absorbs its unique fields: `candidate_above_in_party`, `candidate_below_in_party`, `votes_behind_rank_above`, `votes_ahead_of_rank_below`, `all_party_candidates`.
+- `analyze_vote_distribution` removed → `analyze_geographic_concentration` gains `hhi` field (Herfindahl-Hirschman Index = Σ(si²), 4 decimal places) in both party and candidate paths.
+
+**Tool count: 46 → 38** (removed 8 tools, added 1 new `find_comparable_areas`).
+
+**Test results:** 159/159 passed. Build clean.
+
+**Files changed:** `src/tools/analytics/index.ts`, `src/tools/area/index.ts`, `src/tools/retrieval/index.ts`, `Implementation_plan_tool_update.md`
+
+---
+
 ## 2019 PARLIAMENTARY CANDIDATE DATA ADDED — 2026-03-16 23:37:43
 
 Investigated and registered 2019 parliamentary candidate tables from StatFin_Passiivi. All 13 vaalipiiri tables found and verified.

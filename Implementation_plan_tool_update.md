@@ -24,7 +24,7 @@ This plan is the direct result of a full code audit of all tool implementations 
 | Tool | Assessment | Issues |
 |---|---|---|
 | `resolve_party` | Sound. Three-pass resolution (exact alias → fuzzy alias → metadata). | Correct. The bigram-based `scoreMatch()` is appropriate for Finnish party names. |
-| `resolve_area` | Sound. Fetches from live metadata for fresh area codes. | The `hyvinvointialue` path uses `six_digit` codes from `14y4` (e.g. `020000`), but the B3 spec described `HV07`-style codes. Need to verify that downstream tools (e.g. `get_party_results` for regional elections) accept the same six-digit format that `resolve_area` returns. If not, a mapping step is missing. |
+| `resolve_area` | Sound. Fetches from live metadata for fresh area codes. | **Confirmed correct.** Live API check shows that 14y4 PxWeb value codes are 6-digit numeric (e.g. `010000`, `020000`). The `HVA01`/`KU018` prefixes appear only in valueTexts (display labels), not the actual codes. The `six_digit` format and the `endsWith('0000')` filter in `getHyvinvointialueList()` are correct. No mapping step is missing. |
 | `resolve_candidate` | Sound. Election-type-aware since B1/B2 implementation. The `scoreMatchFast()` bigram approach handles Finnish name order variations well. | Fan-out to 21 hyvinvointialue tables for regional elections without a `unit_key` is expensive (21 API calls). The tool description warns about this but does not estimate latency for regional. |
 | `resolve_entities` | Sound. Batch wrapper. Parallelises correctly. | Good design — reduces LLM round-trips for multi-entity workflows. Keep as-is. |
 
@@ -404,9 +404,7 @@ The turnout table for äänestysalue-level data has ~2000 rows. The cap truncate
 
 **Recommended:** Add ENP computation to `analyze_party_profile` and register in `explain_metric`.
 
-**Recommended:** Add `election_outcome` and optionally `incumbent` fields to `analyze_candidate_profile` output by fetching from the appropriate outcome table. See Phase T4 for implementation spec.
-
-### 3.5 Pearson correlation in `estimate_vote_transfer_proxy`
+### 3.9 Pearson correlation in `estimate_vote_transfer_proxy`
 
 Adding a Pearson r between `loser_change` and `gainer_change` across all areas (or within a vaalipiiri) would turn an ad hoc co-movement count into a statistically meaningful proxy estimate. This requires no additional API calls — it's a computation over the already-fetched data.
 
@@ -502,7 +500,7 @@ Q: "Find municipalities most similar to Tampere for Green support"
 → resolve_area("Tampere") → find_comparable_areas(reference=KU837, subjects=["VIHR"], elections=[{parl:2023}])
 
 Q: "Did Atte Harjanne run for EU parliament?"
-→ scrape_candidate_trajectory("Atte Harjanne", election_types=["eu_parliament","parliamentary"], years=[2023,2024])
+→ get_candidate_trajectory("Atte Harjanne", election_types=["eu_parliament","parliamentary"], years=[2023,2024])
 ```
 
 ### 5.3 Delivery format

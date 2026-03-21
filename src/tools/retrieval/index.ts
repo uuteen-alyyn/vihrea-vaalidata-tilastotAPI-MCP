@@ -47,12 +47,17 @@ export function registerRetrievalTools(server: McpServer): void {
         'Parliamentary/municipal: 6-digit (e.g. "010091" for Helsinki kunta, "SSS" for national). ' +
         'Regional: HV##-format (e.g. "HV01"). EU: 5-digit. Presidential: VP##.'
       ),
+      area_level: z.enum(['kunta', 'vaalipiiri', 'hyvinvointialue', 'koko_suomi', 'aanestysalue']).optional().describe(
+        'Filter results to a specific area level. Omit for all levels. ' +
+        'Useful when you want only national or vaalipiiri rows without fetching all area data.'
+      ),
       output_mode: z.enum(['data', 'analysis']).optional().describe('data = normalized rows, analysis = summary with methodology.'),
     },
-    async ({ year, election_type, area_id, output_mode }) => {
+    async ({ year, election_type, area_id, area_level, output_mode }) => {
       const electionType: ElectionType = election_type ?? 'parliamentary';
       try {
-        const { rows, tableId } = await loadPartyResults(year, area_id, electionType);
+        const { rows: allRows, tableId } = await loadPartyResults(year, area_id, electionType);
+        const rows = area_level ? allRows.filter(r => r.area_level === area_level) : allRows;
         const source = { table_ids: [tableId], query_timestamp: new Date().toISOString() };
         const mode = parseOutputMode(output_mode);
         if (mode === 'analysis') return buildPartyAnalysis(rows, year, source);
@@ -232,61 +237,19 @@ export function registerRetrievalTools(server: McpServer): void {
     }
   );
 
-  // ── get_election_results ─────────────────────────────────────────────────
-  server.tool(
-    'get_election_results',
-    'Returns the full party result dataset for an election, optionally filtered to a specific area level. Supports all election types.',
-    {
-      year: z.number().describe('Election year.'),
-      election_type: ELECTION_TYPE_PARAM,
-      area_level: z.enum(['kunta', 'vaalipiiri', 'hyvinvointialue', 'koko_suomi']).optional().describe('Filter results to this area level. Omit for all levels.'),
-      output_mode: z.enum(['data', 'analysis']).optional(),
-    },
-    async ({ year, election_type, area_level, output_mode }) => {
-      const electionType: ElectionType = election_type ?? 'parliamentary';
-      try {
-        const { rows: allRows, tableId } = await loadPartyResults(year, undefined, electionType);
-        const rows = area_level ? allRows.filter(r => r.area_level === area_level) : allRows;
-        const source = { table_ids: [tableId], query_timestamp: new Date().toISOString() };
-        const mode = parseOutputMode(output_mode);
-        if (mode === 'analysis') return buildPartyAnalysis(rows, year, source);
-        return { content: [{ type: 'text' as const, text: JSON.stringify({ mode: 'data', rows, source }, null, 2) }] };
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return { content: [{ type: 'text' as const, text: JSON.stringify({ error: msg }) }] };
-      }
-    }
-  );
-
   // ── get_rankings ─────────────────────────────────────────────────────────
   server.tool(
     'get_rankings',
-    'Returns ranked list of parties or candidates within a defined scope. Supports all election types.',
+    'Returns ranked list of parties or candidates within a defined scope. Use limit to get only the top N. Supports all election types.',
     {
       year: z.number().describe('Election year.'),
       election_type: ELECTION_TYPE_PARAM,
-      subject: z.enum(['parties', 'candidates']).describe('Rank parties or candidates.'),
+      subject: z.enum(['parties', 'candidates']).describe('Rank parties or candidates. Also accepts singular forms "party" and "candidate".'),
       area_id: z.string().optional().describe('Area code to rank parties within. Omit for national. Use SSS/national for national party rankings.'),
       unit_key: z.string().optional().describe('For candidate rankings: vaalipiiri/hyvinvointialue key. Required unless EU/presidential.'),
-      limit: z.number().optional().describe('Return only the top N results. Omit for all.'),
+      limit: z.number().optional().describe('Return only the top N results. Omit for all results.'),
     },
     async (args) => computeRankings(args)
-  );
-
-  // ── get_top_n ────────────────────────────────────────────────────────────
-  server.tool(
-    'get_top_n',
-    'Convenience tool: returns the top N parties or candidates by votes within a scope.',
-    {
-      year: z.number().describe('Election year.'),
-      election_type: ELECTION_TYPE_PARAM,
-      subject: z.enum(['parties', 'candidates']).describe('Rank parties or candidates.'),
-      n: z.number().describe('Number of top results to return.'),
-      area_id: z.string().optional().describe('Area code to rank within.'),
-      unit_key: z.string().optional().describe('For candidate rankings: vaalipiiri/hyvinvointialue key.'),
-    },
-    async ({ year, election_type, subject, n, area_id, unit_key }) =>
-      computeRankings({ year, election_type, subject, area_id, unit_key, limit: n })
   );
 
   // ── query_election_data ───────────────────────────────────────────────────
@@ -434,16 +397,18 @@ async function computeRankings({
 }: {
   year: number;
   election_type?: string;
-  subject: 'parties' | 'candidates';
+  subject: string;
   area_id?: string;
   unit_key?: string;
   limit?: number;
 }) {
   const electionType: ElectionType = (election_type as ElectionType) ?? 'parliamentary';
+  // Accept singular forms as aliases
+  const normalizedSubject = (subject === 'party' ? 'parties' : subject === 'candidate' ? 'candidates' : subject) as 'parties' | 'candidates';
   type RankedRow = { rank: number; votes: number; vote_share?: number; [k: string]: unknown };
 
   try {
-    if (subject === 'parties') {
+    if (normalizedSubject === 'parties') {
       const { rows, tableId } = await loadPartyResults(year, area_id ?? 'SSS', electionType);
       let ranked: RankedRow[] = rows
         .filter(r => r.party_id !== 'SSS' && r.party_id !== '00')
@@ -451,7 +416,7 @@ async function computeRankings({
         .map((r, i) => ({ rank: i + 1, party_id: r.party_id, party_name: r.party_name, votes: r.votes, vote_share: r.vote_share }));
       if (limit) ranked = ranked.slice(0, limit);
       return { content: [{ type: 'text' as const, text: JSON.stringify({
-        subject, year, election_type: electionType,
+        subject: normalizedSubject, year, election_type: electionType,
         scope: area_id ?? 'national',
         rankings: ranked,
         source: { table_ids: [tableId], query_timestamp: new Date().toISOString() },
@@ -469,7 +434,7 @@ async function computeRankings({
         .map((r, i) => ({ rank: i + 1, candidate_id: r.candidate_id, candidate_name: r.candidate_name, party_id: r.party_id, votes: r.votes, vote_share: r.vote_share }));
       if (limit) ranked = ranked.slice(0, limit);
       return { content: [{ type: 'text' as const, text: JSON.stringify({
-        subject, year, election_type: electionType,
+        subject: normalizedSubject, year, election_type: electionType,
         scope: unit_key ?? unit_code ?? 'national',
         rankings: ranked,
         source: { table_ids: [tableId], query_timestamp: new Date().toISOString() },

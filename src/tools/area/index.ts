@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { loadPartyResults, loadCandidateResults } from '../../data/loaders.js';
 import { PARLIAMENTARY_TABLES } from '../../data/election-tables.js';
+import { queryElectionData } from '../../data/query-engine.js';
 import type { ElectionRecord, ElectionType } from '../../data/types.js';
 import { ELECTION_TYPE_PARAM, subnatLevel, matchesParty, pct, round2, mcpText, errResult } from '../shared.js';
 
@@ -363,17 +364,18 @@ export function registerAreaTools(server: McpServer): void {
   // ── find_strongholds ──────────────────────────────────────────────────────
   server.tool(
     'find_strongholds',
-    'Finds the strongest geographic areas for a party or candidate — areas where they achieve the highest vote share. Returns areas ranked by vote share descending.',
+    'Finds the strongest or weakest geographic areas for a party or candidate by vote share. direction=\'strongholds\' (default) returns highest-share areas; direction=\'weak_zones\' returns lowest-share areas. Replaces the removed find_weak_zones tool.',
     {
       year: z.number().describe('Election year.'),
       election_type: ELECTION_TYPE_PARAM,
-      subject_type: z.enum(['party', 'candidate']).describe('Whether to find strongholds for a party or a candidate.'),
+      subject_type: z.enum(['party', 'candidate']).describe('Whether to find areas for a party or a candidate.'),
       subject_id: z.string().describe('Party abbreviation (e.g. "KOK") or candidate_id.'),
       unit_key: z.string().optional().describe('Required when subject_type=candidate (vaalipiiri/hyvinvointialue key). Omit for EU/presidential.'),
       min_votes: z.number().optional().describe('Minimum votes to include an area. Defaults to 10.'),
-      limit: z.number().optional().describe('Number of top areas to return. Defaults to 15.'),
+      limit: z.number().optional().describe('Number of areas to return. Defaults to 15.'),
+      direction: z.enum(['strongholds', 'weak_zones']).optional().describe("'strongholds' (default) = highest vote share areas; 'weak_zones' = lowest vote share areas."),
     },
-    async ({ year, election_type, subject_type, subject_id, unit_key, min_votes = 10, limit = 15 }) => {
+    async ({ year, election_type, subject_type, subject_id, unit_key, min_votes = 10, limit = 15, direction = 'strongholds' }) => {
       const electionType: ElectionType = election_type ?? 'parliamentary';
       const areaLvl = subnatLevel(electionType);
       if (subject_type === 'party') {
@@ -395,8 +397,10 @@ export function registerAreaTools(server: McpServer): void {
         );
         if (areaRows.length === 0) return errResult(`Party "${subject_id}" not found in ${electionType} ${year} at ${areaLvl} level.`);
 
-        const strongholds = [...areaRows]
-          .sort((a, b) => (b.vote_share ?? 0) - (a.vote_share ?? 0))
+        const sortedAreas = [...areaRows]
+          .sort((a, b) => direction === 'weak_zones'
+            ? (a.vote_share ?? 0) - (b.vote_share ?? 0)
+            : (b.vote_share ?? 0) - (a.vote_share ?? 0))
           .slice(0, limit)
           .map((r, i) => ({
             rank: i + 1,
@@ -407,6 +411,7 @@ export function registerAreaTools(server: McpServer): void {
           }));
 
         const nationalRow = rows.find(r => matchesParty(r, subject_id) && r.area_level === 'koko_suomi');
+        const areasKey = direction === 'weak_zones' ? 'weak_zones' : 'strongholds';
 
         return mcpText({
           subject_type: 'party',
@@ -415,8 +420,8 @@ export function registerAreaTools(server: McpServer): void {
           election_type: electionType,
           area_level: areaLvl,
           national_share_pct: nationalRow?.vote_share ? pct(nationalRow.vote_share) : null,
-          strongholds,
-          method: { description: 'Ranked by vote share descending. Min votes filter applied to exclude tiny areas.', source_table: tableId },
+          [areasKey]: sortedAreas,
+          method: { description: `Ranked by vote share ${direction === 'weak_zones' ? 'ascending' : 'descending'}. Min votes filter applied to exclude tiny areas.`, source_table: tableId },
         });
 
       } else {
@@ -440,8 +445,10 @@ export function registerAreaTools(server: McpServer): void {
 
         const vpRow = allRows.find(r => r.candidate_id === subject_id && (r.area_level === 'vaalipiiri' || r.area_level === 'hyvinvointialue' || r.area_level === 'koko_suomi'));
 
-        const strongholds = [...candidateRows]
-          .sort((a, b) => (b.vote_share ?? 0) - (a.vote_share ?? 0))
+        const sortedCandAreas = [...candidateRows]
+          .sort((a, b) => direction === 'weak_zones'
+            ? (a.vote_share ?? 0) - (b.vote_share ?? 0)
+            : (b.vote_share ?? 0) - (a.vote_share ?? 0))
           .slice(0, limit)
           .map((r, i) => ({
             rank: i + 1,
@@ -451,6 +458,7 @@ export function registerAreaTools(server: McpServer): void {
             vote_share_pct: pct(r.vote_share!),
           }));
 
+        const candAreasKey = direction === 'weak_zones' ? 'weak_zones' : 'strongholds';
         return mcpText({
           subject_type: 'candidate',
           subject_id,
@@ -460,15 +468,16 @@ export function registerAreaTools(server: McpServer): void {
           election_type: electionType,
           unit_key: unit_key ?? 'national',
           unit_share_pct: vpRow?.vote_share ? pct(vpRow.vote_share) : null,
-          strongholds,
-          method: { description: 'Ranked by vote share descending at äänestysalue level. Min votes filter applied.', source_table: tableId },
+          [candAreasKey]: sortedCandAreas,
+          method: { description: `Ranked by vote share ${direction === 'weak_zones' ? 'ascending' : 'descending'} at äänestysalue level. Min votes filter applied.`, source_table: tableId },
         });
       }
     }
   );
 
-  // ── find_weak_zones ───────────────────────────────────────────────────────
-  server.tool(
+  // find_weak_zones REMOVED (T1): use find_strongholds with direction='weak_zones'.
+  // DEAD CODE START
+  /*
     'find_weak_zones',
     'Finds the weakest geographic areas for a party or candidate — areas where they achieve the lowest vote share. Inverse of find_strongholds.',
     {
@@ -571,6 +580,131 @@ export function registerAreaTools(server: McpServer): void {
           method: { description: 'Ranked by vote share ascending at äänestysalue level. Min votes filter applied.', source_table: tableId },
         });
       }
+    }
+  // DEAD CODE END
+  */
+
+  // ── find_comparable_areas ─────────────────────────────────────────────────
+  server.tool(
+    'find_comparable_areas',
+    'Find municipalities with vote-share patterns most similar to a reference municipality. Fetches party data at kunta level for each requested election, builds a vote-share vector per kunta (one dimension per subject × election pair), normalizes each dimension to [0,1] across all kunnat, then ranks by Euclidean distance from the reference area. Smaller distance = more similar electoral behaviour.',
+    {
+      reference_area_id: z.string().describe('area_id of the reference municipality in the format returned by query_election_data at kunta level (e.g. "KU837" for Tampere from 13t2/14vm tables, or the 6-digit code from multi-year tables).'),
+      subjects: z.array(z.string()).min(1).max(10).describe('Party IDs to include in the similarity vector (e.g. ["VIHR", "SDP"]). Each subject × election pair becomes one dimension.'),
+      elections: z.array(z.object({
+        election_type: ELECTION_TYPE_PARAM,
+        year: z.number().describe('Election year.'),
+      })).min(1).max(6).describe('List of elections to use. Each election × subject pair is one dimension of the similarity vector.'),
+      n_results: z.number().int().min(1).max(50).default(10).describe('Number of most-similar municipalities to return (default: 10).'),
+    },
+    async ({ reference_area_id, subjects, elections, n_results }) => {
+      // Fan-out: fetch kunta-level party data for all requested elections simultaneously.
+      // query_election_data takes flat election_types × years; we post-filter to exact pairs.
+      const electionTypes = [...new Set(elections.map((e) => e.election_type))] as ElectionType[];
+      const years = [...new Set(elections.map((e) => e.year))];
+      const requestedPairs = new Set(elections.map((e) => `${e.election_type}:${e.year}`));
+
+      let rows: ElectionRecord[];
+      let tableIds: string[];
+      try {
+        const result = await queryElectionData({
+          subject_type: 'party',
+          subject_ids: subjects,
+          election_types: electionTypes,
+          years,
+          area_level: 'kunta',
+        });
+        rows = result.rows;
+        tableIds = result.table_ids;
+      } catch (err) {
+        return errResult(`Failed to fetch data: ${String(err)}`);
+      }
+
+      // Keep only rows from the exact requested (election_type × year) pairs.
+      rows = rows.filter((r) => requestedPairs.has(`${r.election_type}:${r.year}`));
+
+      // Build dimension keys: one per (subject × election_type × year) combination.
+      const dimensions: { subject: string; election_type: ElectionType; year: number; key: string }[] = [];
+      for (const e of elections) {
+        const et = e.election_type as ElectionType;
+        for (const s of subjects) {
+          dimensions.push({ subject: s, election_type: et, year: e.year, key: `${s}::${et}::${e.year}` });
+        }
+      }
+
+      // Group rows by area_id, then by dimension key → raw vote_share.
+      const areaMap = new Map<string, Map<string, number>>();
+      for (const r of rows) {
+        if (!r.party_id || r.vote_share === undefined) continue;
+        const dimKey = `${r.party_id}::${r.election_type}::${r.year}`;
+        let areaEntry = areaMap.get(r.area_id);
+        if (!areaEntry) { areaEntry = new Map(); areaMap.set(r.area_id, areaEntry); }
+        areaEntry.set(dimKey, r.vote_share);
+      }
+
+      if (areaMap.size === 0) {
+        return errResult('No kunta-level data found for the given elections and subjects. Check that the election years and subjects are correct.');
+      }
+
+      if (!areaMap.has(reference_area_id)) {
+        const sample = [...areaMap.keys()].slice(0, 5).join(', ');
+        return errResult(`reference_area_id "${reference_area_id}" not found in results. Sample area_ids: ${sample}. Make sure to use the exact format returned by query_election_data at kunta level.`);
+      }
+
+      // Collect area_names from the rows for output.
+      const areaNames = new Map<string, string>();
+      for (const r of rows) { if (r.area_name) areaNames.set(r.area_id, r.area_name); }
+
+      // Normalize each dimension to [0, 1] across all kunnat.
+      const allAreaIds = [...areaMap.keys()];
+      const dimMins = new Map<string, number>();
+      const dimMaxs = new Map<string, number>();
+      for (const d of dimensions) {
+        const vals = allAreaIds.map((id) => areaMap.get(id)?.get(d.key) ?? 0);
+        dimMins.set(d.key, Math.min(...vals));
+        dimMaxs.set(d.key, Math.max(...vals));
+      }
+
+      function normalizedVec(areaId: string): number[] {
+        const entry = areaMap.get(areaId);
+        return dimensions.map((d) => {
+          const raw = entry?.get(d.key) ?? 0;
+          const mn = dimMins.get(d.key)!;
+          const mx = dimMaxs.get(d.key)!;
+          return mx === mn ? 0.5 : (raw - mn) / (mx - mn);
+        });
+      }
+
+      const refVec = normalizedVec(reference_area_id);
+
+      // Compute Euclidean distance from reference for every other kunta.
+      const scored = allAreaIds
+        .filter((id) => id !== reference_area_id)
+        .map((id) => {
+          const vec = normalizedVec(id);
+          const dist = Math.sqrt(vec.reduce((sum, v, i) => sum + (v - refVec[i]!) ** 2, 0));
+          return { area_id: id, area_name: areaNames.get(id) ?? id, distance: round2(dist) };
+        })
+        .sort((a, b) => a.distance - b.distance)
+        .slice(0, n_results);
+
+      // Build reference summary for context.
+      const refEntry = areaMap.get(reference_area_id)!;
+      const refSummary: Record<string, number> = {};
+      for (const d of dimensions) {
+        refSummary[d.key.replace(/::/g, ' / ')] = round2(refEntry.get(d.key) ?? 0);
+      }
+
+      return mcpText({
+        reference: { area_id: reference_area_id, area_name: areaNames.get(reference_area_id) ?? reference_area_id, vote_shares: refSummary },
+        comparable_areas: scored,
+        dimensions: dimensions.map((d) => `${d.subject} / ${d.election_type} ${d.year}`),
+        method: {
+          description: 'Euclidean distance on normalized vote-share vectors. Each dimension (subject × election) normalized to [0,1] across all kunnat so different base vote shares contribute equally.',
+          n_kunnat_compared: allAreaIds.length - 1,
+          source_tables: tableIds,
+        },
+      });
     }
   );
 
