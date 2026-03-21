@@ -1380,3 +1380,28 @@ Updated `explain_metric` tool description to advertise `enp` in the known metric
 
 **Files changed:** `src/tools/discovery/index.ts`, `src/tools/entity-resolution/index.ts`, `src/tools/retrieval/index.ts`, `src/data/loaders.ts`, `Logbook.md`.
 **Build:** clean. **Tests:** 159/159 passed.
+
+---
+
+## STAGE 2 (T1/T2 cleanup): DEAD CODE REMOVAL + BACKLOG UPDATE — 2026-03-21
+
+**Context:** T1 tool consolidation and T2 renames/fixes were already implemented in previous sessions. This session confirms all removals are complete and cleans up the remaining artifacts.
+
+**Active tool inventory (39 tools):**
+Discovery (6): list_elections, list_area_levels, describe_election, describe_available_data, get_area_hierarchy, list_unit_keys
+Entity Resolution (4): resolve_party, resolve_area, resolve_candidate, resolve_entities
+Retrieval (6): get_party_results, get_candidate_results, get_turnout, get_area_results, get_rankings, query_election_data
+Analytics (6): analyze_candidate_profile, analyze_party_profile, compare_candidates, compare_parties, find_area_overperformance, analyze_geographic_concentration
+Strategic (4): detect_inactive_high_vote_candidates, find_vote_decline_areas, estimate_vote_transfer_proxy, rank_areas_for_party
+Area (5): get_area_profile, compare_areas, analyze_area_volatility, find_strongholds, find_comparable_areas
+Comparison (2): compare_across_dimensions, get_candidate_trajectory
+Audit (4): explain_metric, trace_result_lineage, validate_comparison, get_data_caveats
+Demographics (2): get_voter_background, get_voter_turnout_by_demographics
+
+**Changes in this session:**
+- Removed dead code blocks: `analyze_within_party_position` and `analyze_vote_distribution` from `src/tools/analytics/index.ts`
+- Removed dead code block: `find_weak_zones` from `src/tools/area/index.ts`
+- Updated `BACKLOG.md`: marked T1 and T2 as ✅ DONE; updated Phase 15 test note to use `compare_across_dimensions`
+
+**Files changed:** `src/tools/analytics/index.ts`, `src/tools/area/index.ts`, `BACKLOG.md`, `Logbook.md`.
+**Build:** clean. **Tests:** 159/159 passed.
