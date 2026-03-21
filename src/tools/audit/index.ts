@@ -23,6 +23,7 @@ const METRIC_REGISTRY: Record<string, {
       'Finnish parliamentary elections typically show 8–15pp. Values above 15 indicate high volatility.',
       'Computed from 13sw party vote shares at the specified area level.',
       'New and disappeared parties contribute their full share to the index.',
+      'pedersen_index is the standard published value (Pedersen 1979). pedersen_normalized_heuristic divides by (years_between/4) to adjust for election gap — this normalization is non-standard and not published in comparative literature; treat as indicative only.',
     ],
   },
   vote_share: {

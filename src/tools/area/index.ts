@@ -132,7 +132,7 @@ export function registerAreaTools(server: McpServer): void {
       // Volatility between consecutive available years
       const volatility: Array<{
         from_year: number; to_year: number; years_between: number;
-        pedersen_index: number; pedersen_per_4yr_cycle: number;
+        pedersen_index: number; pedersen_normalized_heuristic: number;
       }> = [];
       for (let i = 1; i < yearData.length; i++) {
         const prev = yearData[i - 1]!;
@@ -147,8 +147,8 @@ export function registerAreaTools(server: McpServer): void {
             to_year: curr.year,
             years_between: yearsBetween,
             pedersen_index: pedersen,
-            // POL-8: normalize by period length so different-gap elections are comparable
-            pedersen_per_4yr_cycle: round2(pedersen / (yearsBetween / 4)),
+            // Non-standard heuristic only — pedersen_index is the primary value
+            pedersen_normalized_heuristic: round2(pedersen / (yearsBetween / 4)),
           });
         }
       }
@@ -174,7 +174,7 @@ export function registerAreaTools(server: McpServer): void {
             : null,
         },
         method: {
-          description: 'Party data from 13sw. Historical trend tracks top parties from the reference year. Pedersen volatility = sum(|share_t - share_{t-1}|) / 2.',
+          description: 'Party data from 13sw. Historical trend tracks top parties from the reference year. pedersen_index = sum(|share_t - share_{t-1}|) / 2 (primary value). pedersen_normalized_heuristic = pedersen_index ÷ (years_between/4) — non-standard, treat as indicative only.',
           source_table: primaryTableId,
           // POL-16: named specific Finnish party discontinuity events
           pedersen_method_note: 'The Pedersen index is keyed on party_id. Known Finnish party discontinuities that inflate the index: SMP→PS (1995 election); SKL→KD (2001 rename); Sini/Sininen tulevaisuus split from PS (2017, appears in 2019 results). Elections spanning these years should be interpreted with extra caution.',
@@ -296,7 +296,7 @@ export function registerAreaTools(server: McpServer): void {
 
       const volatility: Array<{
         from_year: number; to_year: number; years_between: number;
-        pedersen_index: number; pedersen_per_4yr_cycle: number;
+        pedersen_index: number; pedersen_normalized_heuristic: number;
         biggest_gainer: { party_name: string | undefined; change_pp: number } | null;
         biggest_loser: { party_name: string | undefined; change_pp: number } | null;
       }> = [];
@@ -335,8 +335,8 @@ export function registerAreaTools(server: McpServer): void {
           to_year: curr.year,
           years_between: yearsBetween,
           pedersen_index: pedersen,
-          // POL-8: normalize for inter-election period length (Finnish cycle ≈ 4 years)
-          pedersen_per_4yr_cycle: round2(pedersen / (yearsBetween / 4)),
+          // Non-standard heuristic only — pedersen_index is the primary value
+          pedersen_normalized_heuristic: round2(pedersen / (yearsBetween / 4)),
           biggest_gainer: sorted[0] ? { party_name: sorted[0].party_name, change_pp: sorted[0].change_pp } : null,
           biggest_loser: sorted[sorted.length - 1] ? { party_name: sorted[sorted.length - 1]!.party_name, change_pp: sorted[sorted.length - 1]!.change_pp } : null,
         });
@@ -358,7 +358,7 @@ export function registerAreaTools(server: McpServer): void {
           interpretation: `Average Pedersen index of ${avgVolatility} means ~${avgVolatility}pp of votes shifted between parties per election on average. Values above 10 indicate high volatility; Finnish average is typically 8–12pp.`,
         },
         method: {
-          description: 'Pedersen volatility index = sum(|share_t - share_{t-1}|) / 2. Computed from 13sw party vote shares at the specified area level. pedersen_per_4yr_cycle normalizes for inter-election gap (÷ years_between/4) to make different-gap elections comparable.',
+          description: 'pedersen_index = sum(|share_t - share_{t-1}|) / 2 — primary value, standard Pedersen (1979). pedersen_normalized_heuristic = pedersen_index ÷ (years_between/4) — non-standard normalization, treat as indicative only.',
           source_table: tableId,
           // POL-16: specific Finnish party discontinuity events named
           pedersen_method_note: 'The Pedersen index is keyed on party_id. Known Finnish party discontinuities that inflate the index: SMP→PS (1995 election — SMP dissolves, PS inherits some support); SKL→KD (2001 rename); Sini/Sininen tulevaisuus split from PS (2017, appears in 2019 results). Elections spanning these years should be interpreted with extra caution.',

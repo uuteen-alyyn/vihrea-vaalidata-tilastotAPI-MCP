@@ -325,6 +325,21 @@ export function registerStrategicTools(server: McpServer): void {
       const consistent = areaAnalysis.filter((a) => a.co_movement === 'consistent_with_transfer');
       const inconsistent = areaAnalysis.filter((a) => a.co_movement === 'inconsistent');
 
+      // Pearson r between loser_change and gainer_change across all areas with both values
+      const paired = areaAnalysis.filter((a) => a.loser_change !== null && a.gainer_change !== null) as
+        Array<{ loser_change: number; gainer_change: number; [key: string]: unknown }>;
+      let areaCorrR: number | null = null;
+      if (paired.length >= 3) {
+        const xs = paired.map(a => a.loser_change);
+        const ys = paired.map(a => a.gainer_change);
+        const n = xs.length;
+        const xMean = xs.reduce((s, v) => s + v, 0) / n;
+        const yMean = ys.reduce((s, v) => s + v, 0) / n;
+        const num = xs.reduce((s, v, i) => s + (v - xMean) * (ys[i]! - yMean), 0);
+        const den = Math.sqrt(xs.reduce((s, v) => s + (v - xMean) ** 2, 0) * ys.reduce((s, v) => s + (v - yMean) ** 2, 0));
+        areaCorrR = den > 0 ? Math.round((num / den) * 1000) / 1000 : null;
+      }
+
       // National-level totals
       const nationalLoser1 = rows1.find((r) => matchesParty(r, losing_party_id) && r.area_level === 'koko_suomi');
       const nationalLoser2 = rows2.find((r) => matchesParty(r, losing_party_id) && r.area_level === 'koko_suomi');
@@ -358,6 +373,10 @@ export function registerStrategicTools(server: McpServer): void {
           pct_consistent: areaAnalysis.length > 0
             ? pct(consistent.length / areaAnalysis.length * 100) : null,
           pct_consistent_caution: 'This percentage counts areas where both conditions are directionally met (loser lost ≥50 votes AND gainer gained ≥10% of loser loss). It is NOT a probability of voter transfer. Even unrelated parties show co-movement when both track a national swing.',
+          area_correlation_r: areaCorrR,
+          area_correlation_note: areaCorrR !== null
+            ? `Pearson r=${areaCorrR} between loser_change and gainer_change across ${paired.length} areas. Positive r = areas where loser lost more also tended to be areas where gainer gained more, consistent with a transfer pattern. r>0.5 is moderate evidence; r>0.7 is strong. Note: r measures co-movement, not causation.`
+            : `Pearson r not computed (fewer than 3 areas with complete data).`,
         },
         top_transfer_areas: consistent
           .sort((a, b) => Math.abs(b.loser_change ?? 0) - Math.abs(a.loser_change ?? 0))
@@ -456,8 +475,9 @@ export function registerStrategicTools(server: McpServer): void {
         const totalVotes = allVotesByArea.get(r.area_id) ?? 0;
 
         // Component 1: current vote share relative to national (0–1)
-        // Normalized so national share = 0.5; above-average areas score > 0.5
-        const c1_current_support = Math.min(1, share / (nationalShare * 2));
+        // Ratio to national average, capped at 3× to allow differentiation at the top end.
+        // score = min(share/national, 3) / 3 → national average = 0.333, 3× national = 1.0
+        const c1_current_support = Math.min(share / nationalShare, 3) / 3;
 
         // Component 2: growth trend (0–1; 0.5 if no trend data)
         // Uses percentile rank within the actual distribution of trend changes for this
@@ -519,7 +539,7 @@ export function registerStrategicTools(server: McpServer): void {
           description: 'Composite score = weighted average of 3 independent components (all 0–1).',
           weights: { c1_current_support: 0.40, c2_trend: 0.35, c3_size: 0.25 },
           components: {
-            c1_current_support: 'Current party vote share relative to national average. Above-national = higher score.',
+            c1_current_support: 'Current party vote share relative to national average. Formula: min(share/national, 3)/3 — national average scores 0.33, 3× national scores 1.0. Areas up to 3× above national are differentiated.',
             c2_trend: 'Percentile rank of vote share change (trend_year → reference_year) within the actual distribution of changes across all scored areas. An area with the largest gain scores 1.0; the largest loss scores 0.0. 0.5 if no trend year provided. Percentile rank avoids the fixed ±10pp scale which would compress typical Finnish area-level swings (±1–3pp) into a near-constant range.',
             c3_size: `Total votes cast in area relative to the largest area. Measures electorate size, not party vote volume.`,
           },

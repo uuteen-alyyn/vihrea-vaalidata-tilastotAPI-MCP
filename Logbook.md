@@ -2,6 +2,29 @@
 
 ---
 
+## PHASE T3: MATHEMATICAL METRIC FIXES — 2026-03-21 10:30:43
+
+**T3.1 — Pedersen normalization label:**
+- `pedersen_per_4yr_cycle` renamed to `pedersen_normalized_heuristic` in both `get_area_profile` and `analyze_area_volatility` outputs.
+- Method descriptions updated to clarify that `pedersen_index` is the standard primary value (Pedersen 1979) and `pedersen_normalized_heuristic` is a non-standard period-length adjustment.
+- `explain_metric` entry for `pedersen_index` now notes this distinction.
+
+**T3.2 — `rank_areas_for_party` c1 formula:**
+- Old: `Math.min(1, share / (nationalShare × 2))` — areas above 2× national all scored 1.0 (no differentiation at the top)
+- New: `Math.min(share / nationalShare, 3) / 3` — national average scores 0.33, 2× national scores 0.67, 3× national scores 1.0; differentiates up to 3× national
+- c1 description updated in tool output
+
+**T3.3 — Pearson r in `estimate_vote_transfer_proxy`:**
+- Added Pearson r computation between `loser_change` and `gainer_change` across all areas with complete data (minimum 3 pairs).
+- Output: `area_co_movement.area_correlation_r` (3 decimal places) + `area_correlation_note` with interpretation guide.
+- Positive r = areas with larger loser losses also had larger gainer gains (consistent with transfer). r>0.5 moderate, r>0.7 strong.
+
+**T3.4:** `analyze_vote_distribution` already dropped in T1 — no action needed.
+
+**Test results:** 159/159 passed. Build clean.
+
+---
+
 ## PHASE T2: RENAMES AND DESCRIPTION FIXES — 2026-03-21 10:26:38
 
 **Tool renames:**
