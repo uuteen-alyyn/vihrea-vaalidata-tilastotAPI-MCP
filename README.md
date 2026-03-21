@@ -208,13 +208,40 @@ Fully quit and reopen. You should see a tools icon (hammer) in the chat input.
 
 | Election type | Years with party data | Years with candidate data |
 |---|---|---|
-| Parliamentary | 1983–2023 | 2019, 2023 |
+| Parliamentary | 1983–2023 | 2007, 2011, 2015, 2019, 2023 |
 | Municipal | 1976–2025 | 2021, 2025 |
 | Regional (aluevaalit) | 2022, 2025 | 2025 |
 | EU Parliament | 1996–2024 | 2019, 2024 |
 | Presidential | — | 2024 (rounds 1 & 2) |
 
 Data source: [Tilastokeskus PxWeb API](https://pxdata.stat.fi/PXWeb/pxweb/fi/StatFin/)
+
+---
+
+## MCP Resources
+
+The server exposes three read-only reference resources the LLM can read on demand. These keep tool descriptions lean and are always derived live from the data registry.
+
+| Resource URI | Contents |
+|---|---|
+| `election://coverage` | Which election types and years have party, candidate, and turnout data |
+| `election://unit-keys` | Valid `unit_key` values (vaalipiiri / hyvinvointialue) by election type and year |
+| `election://metrics` | Definitions and formulas for all computed metrics: ENP, Pedersen index, overperformance, etc. |
+
+Claude reads these on demand when it needs to check data availability, validate a unit key, or understand a metric formula.
+
+---
+
+## MCP Prompts
+
+The server registers two parameterized workflow prompts users can invoke as slash commands in Claude Desktop:
+
+| Prompt | Arguments | What it does |
+|---|---|---|
+| `analyze_candidate` | `candidate_name`, `election_type`, `year`, `unit_key` (optional) | Full workflow: resolve candidate → get results → analyze profile |
+| `compare_parties` | `party_ids`, `election_type`, `years`, `focus` (optional) | Cross-election party comparison with ENP and geographic breakdown |
+
+In Claude Desktop, invoke these via the **+** or slash command menu.
 
 ---
 
@@ -240,4 +267,5 @@ A ready-made system prompt is in [system_prompt.md](system_prompt.md).
 | Incumbent flag | Available for municipal and regional elections only (not parliamentary). Not yet exposed as a tool output. |
 | Presidential party data | Not published by Tilastokeskus — only individual candidate vote totals. |
 | Regional candidate data | 2025 only. Tilastokeskus has no candidate-level tables for aluevaalit 2022. |
-| Parliamentary candidate history | 2019 and 2023 only with full äänestysalue breakdown. Earlier years are in the StatFin_Passiivi archive and not yet mapped. |
+| Parliamentary candidate data (2007 / 2011) | These elections used 15 vaalipiiri (before the 2012 boundary reform). Valid unit keys differ from 2015+: use `kymi`, `etela-savo`, `pohjois-savo`, `pohjois-karjala` instead of `kaakkois-suomi` / `savo-karjala`. |
+| Vote transfer | `estimate_vote_transfer_proxy` is a structural area co-movement indicator, not a direct measurement of individual voter movement. Individual-level data is not available in aggregate statistics. |

@@ -1474,3 +1474,25 @@ All Stages 1–6 in Implementation_plan_session_2026-03-21.md are now ✅ comple
 
 **Files changed:** `src/server.ts`, `Implementation_plan_session_2026-03-21.md`, `Logbook.md`.
 **Build:** clean. **Tests:** 159/159 passed.
+
+---
+
+## T5: README AND SYSTEM_PROMPT.MD UPDATE — 2026-03-21
+
+**README changes:**
+- Data coverage table: fixed parliamentary candidate years 2019,2023 → 2007,2011,2015,2019,2023
+- Added MCP Resources section: documents election://coverage, election://unit-keys, election://metrics
+- Added MCP Prompts section: documents analyze_candidate and compare_parties prompts
+- Known limitations: removed incorrect "2019 and 2023 only" claim; added 2007/2011 boundary note and vote transfer proxy caveat
+
+**system_prompt.md rewrite:**
+- Added MCP Resources block with all three resource URIs
+- Updated workflow to match current tool names and include list_unit_keys step
+- Added parliamentary 2007/2011 constraint note
+- Updated example to use compare_across_dimensions (not removed tools)
+- Added MCP Prompt usage example for analyze_candidate
+
+BACKLOG T5 complete.
+
+**Files changed:** `README.md`, `system_prompt.md`, `Logbook.md`.
+**Build:** n/a (documentation only).
