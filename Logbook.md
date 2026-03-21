@@ -1255,3 +1255,35 @@ Implemented `describe_available_data` — the final remaining phase from `Implem
 **Build:** clean. **Tests:** 159/159 passed.
 
 **Implementation plan status:** All phases complete — 0, A1–A6, B1–B3, C2–C5, D2–D3, E3–E4.
+
+## PHASE T4: ENP + ELECTION OUTCOME FROM VALINTATIETO — 2026-03-21 11:15:00
+
+### T4.1 — ENP (Effective Number of Parties)
+
+Added `computeEnp(rows: ElectionRecord[]): number | null` utility to `src/data/normalizer.ts`.
+- Formula: 1 / Σ(pi²) where pi = vote_share / 100
+- Filters out SSS aggregate rows automatically
+- Returns null if fewer than 2 party rows with vote_share
+
+Exposed as:
+- `election_enp` in `analyze_party_profile` (computed from all koko_suomi party rows in the election)
+- `area_enp` in `get_area_profile` (computed from reference-year party rows for the specific area)
+
+Added to `explain_metric` METRIC_REGISTRY as key `enp` with Laakso-Taagepera (1979) attribution, formula, and Finnish-specific notes (typical range 5–7 for parliamentary elections).
+
+### T4.2 — Election Outcome from Valintatieto
+
+**Data layer:**
+- Added `election_outcome?: string` to `ElectionRecord` interface in `src/data/types.ts`
+- Changed `Valintatieto` filter in `src/data/loaders.ts` from `['SSS']` to `['1','2','3']`. Each candidate belongs to exactly one outcome category, so vote counts are equivalent to the SSS aggregate. Parliamentary tables 13t6–13ti have this dimension; municipal/regional tables without it are unaffected by the guard.
+- Added Valintatieto detection (`VALINTA_KEY`) in `normalizeCandidateByAanestysalue` in `src/data/normalizer.ts`. The code is read from each row in both the archive-format path and the content-column path and stored as `election_outcome` on the record.
+
+**Outcome mapping in `analyze_candidate_profile`:**
+- `'1'` → `'elected'`, `'2'` → `'varalla'`, `'3'` → `'not_elected'`, unknown codes → `'unknown'`
+- Exposed as `election_outcome` field in output, positioned before `total_votes`
+- Falls back to `null` if Valintatieto was not available for the election type (presidential, EU)
+
+**Decision:** Vertausluku (comparison number) deferred — requires adding it to the Tiedot filter values, which is a separate change. The plan noted it as optional for this phase.
+
+**Files changed:** `src/data/types.ts`, `src/data/loaders.ts`, `src/data/normalizer.ts`, `src/tools/analytics/index.ts`, `src/tools/area/index.ts`, `src/tools/audit/index.ts`.
+**Build:** clean. **Tests:** 159/159 passed.

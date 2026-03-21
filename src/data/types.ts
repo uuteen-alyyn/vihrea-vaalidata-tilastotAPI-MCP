@@ -30,6 +30,7 @@ export interface ElectionRecord {
   rank_within_party?: number;
   rank_overall?: number;
   round?: number; // Presidential elections: 1 = first round, 2 = second round
+  election_outcome?: string; // Valintatieto code: '1'=elected, '2'=varalla, '3'=not_elected (parliamentary/municipal/regional)
 }
 
 /** Provenance metadata attached to every response */

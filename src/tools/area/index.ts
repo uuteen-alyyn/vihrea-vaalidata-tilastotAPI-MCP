@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { loadPartyResults, loadCandidateResults } from '../../data/loaders.js';
+import { computeEnp } from '../../data/normalizer.js';
 import { PARLIAMENTARY_TABLES } from '../../data/election-tables.js';
 import { queryElectionData } from '../../data/query-engine.js';
 import type { ElectionRecord, ElectionType } from '../../data/types.js';
@@ -157,11 +158,14 @@ export function registerAreaTools(server: McpServer): void {
         ? round2(volatility.reduce((s, v) => s + v.pedersen_index, 0) / volatility.length)
         : null;
 
+      const area_enp = computeEnp(refRows);
+
       return mcpText({
         area_id,
         area_name: areaName,
         area_level: areaLevel,
         reference_year: refYear.year,
+        area_enp,
         top_parties: topParties,
         historical_trend: trend,
         // POL-5: survivorship bias warning — trend tracks current top parties only

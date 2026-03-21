@@ -283,7 +283,9 @@ export async function loadCandidateResults(
       : { filter: 'all', values: ['*'] },
   });
   if (metadata.variables.some((v) => v.code === 'Valintatieto')) {
-    filters.push({ code: 'Valintatieto', selection: { filter: 'item', values: ['SSS'] } });
+    // Fetch individual outcome codes (1=elected, 2=varalla, 3=not_elected) instead of SSS aggregate.
+    // Each candidate belongs to exactly one outcome category, so vote counts are equivalent to SSS.
+    filters.push({ code: 'Valintatieto', selection: { filter: 'item', values: ['1', '2', '3'] } });
   }
   // Round variable (presidential) — fetch all rounds, filter in normalizer
   if (metadata.variables.some((v) => v.code === 'Kierros')) {

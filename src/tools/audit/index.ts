@@ -12,6 +12,19 @@ const METRIC_REGISTRY: Record<string, {
   unit: string;
   notes: string[];
 }> = {
+  enp: {
+    name: 'Effective Number of Parties',
+    used_in: ['analyze_party_profile (field: election_enp)', 'get_area_profile (field: area_enp)'],
+    definition: 'Measures the effective (vote-weighted) number of parties in an election. A higher value means votes are spread across more parties; a lower value means one or two parties dominate.',
+    formula: 'ENP = 1 / Σ(pi²) where pi = party vote share as fraction (0–1)',
+    unit: 'dimensionless',
+    notes: [
+      'Laakso-Taagepera (1979). The standard measure in comparative electoral research.',
+      'Finnish parliamentary elections typically produce ENP 5–7.',
+      'ENP < 3 indicates strong two-party or one-party dominance.',
+      'Computed from party-level vote_share values (koko_suomi for election_enp; area-level for area_enp). SSS aggregate rows are excluded.',
+    ],
+  },
   pedersen_index: {
     name: 'Pedersen Volatility Index',
     used_in: ['get_area_profile', 'analyze_area_volatility'],

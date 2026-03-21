@@ -218,6 +218,24 @@ export function normalizePartyTable(
 }
 
 /**
+ * Compute Effective Number of Parties (Laakso-Taagepera 1979).
+ * Formula: ENP = 1 / Σ(pi²) where pi = party's vote share as fraction (0–1).
+ *
+ * @param rows  Any set of ElectionRecords. SSS aggregate rows are excluded automatically.
+ *              Pass national-level rows for election-wide ENP; area-level rows for area ENP.
+ * @returns ENP rounded to 2 decimal places, or null if fewer than 2 party rows with vote_share.
+ */
+export function computeEnp(rows: ElectionRecord[]): number | null {
+  const partyRows = rows.filter(
+    (r) => r.party_id && r.party_id !== 'SSS' && r.vote_share != null
+  );
+  if (partyRows.length < 2) return null;
+  const sumSq = partyRows.reduce((s, r) => s + (r.vote_share! / 100) ** 2, 0);
+  if (sumSq === 0) return null;
+  return Math.round((1 / sumSq) * 100) / 100;
+}
+
+/**
  * Backward-compatible alias for parliamentary party data.
  * @deprecated Use normalizePartyTable() with a PartyTableSchema instead.
  */
@@ -302,6 +320,9 @@ export function normalizeCandidateByAanestysalue(
     (_, i) => (tiedotVar.valueTexts[i] ?? '').toLowerCase().includes('osuus')
   ) ?? 'evaa_osuus_aanista';
 
+  // Detect election outcome variable (parliamentary / municipal / regional)
+  const VALINTA_KEY = metadata.variables.some((v) => v.code === 'Valintatieto') ? 'Valintatieto' : null;
+
   // Detect round variable (presidential)
   const roundVar  = metadata.variables.find((v) => v.code === 'Kierros');
   const ROUND_KEY = roundVar?.code ?? null;
@@ -323,7 +344,7 @@ export function normalizeCandidateByAanestysalue(
     // ── Archive Sar-dimension format (2019 parliamentary, 2019 EU archive) ──
     const TIEDOT_KEY = tiedotVar?.code ?? 'Äänestystiedot';
     const tiedotIdx  = keyIdx[TIEDOT_KEY];
-    const votesByKey  = new Map<string, { votes: number; areaCode: string; candidateCode: string; roundNum?: number }>();
+    const votesByKey  = new Map<string, { votes: number; areaCode: string; candidateCode: string; roundNum?: number; valintaCode?: string }>();
     const sharesByKey = new Map<string, number>();
 
     for (const row of response.data) {
@@ -331,6 +352,7 @@ export function normalizeCandidateByAanestysalue(
       const candidateCode = row.key[keyIdx[CANDIDATE_KEY]];
       const tiedotCode    = tiedotIdx !== undefined ? row.key[tiedotIdx] : undefined;
       const roundCode     = ROUND_KEY ? row.key[keyIdx[ROUND_KEY]] : undefined;
+      const valintaCode   = VALINTA_KEY ? row.key[keyIdx[VALINTA_KEY]] : undefined;
       if (candidateCode === undefined) continue;
       if (SKIP_CANDIDATE_CODES.has(candidateCode)) continue;
       // 'Puolue ja ehdokas' mixes party aggregates (VIHR, SDP…) with candidates (numeric IDs).
@@ -341,11 +363,11 @@ export function normalizeCandidateByAanestysalue(
       const val = parseFloat(row.values[0] ?? '0');
       if (isNaN(val)) continue;
       const mapKey = `${candidateCode}::${areaCode ?? 'SSS'}::${roundNum ?? 0}`;
-      if (tiedotCode === VOTES_KEY) votesByKey.set(mapKey, { votes: val, areaCode: areaCode ?? 'SSS', candidateCode, roundNum });
+      if (tiedotCode === VOTES_KEY) votesByKey.set(mapKey, { votes: val, areaCode: areaCode ?? 'SSS', candidateCode, roundNum, valintaCode });
       else if (tiedotCode === SHARE_KEY) sharesByKey.set(mapKey, val);
     }
 
-    for (const [mapKey, { votes, areaCode, candidateCode, roundNum }] of votesByKey) {
+    for (const [mapKey, { votes, areaCode, candidateCode, roundNum, valintaCode }] of votesByKey) {
       const candidateText = candidateTexts.get(candidateCode) ?? candidateCode;
       const parsed = parseCandidateValueText(candidateText);
       const record: ElectionRecord = {
@@ -362,6 +384,7 @@ export function normalizeCandidateByAanestysalue(
         vote_share: sharesByKey.get(mapKey),
       };
       if (roundNum !== undefined) record.round = roundNum;
+      if (valintaCode) record.election_outcome = valintaCode;
       records.push(record);
     }
   } else {
@@ -370,6 +393,7 @@ export function normalizeCandidateByAanestysalue(
       const areaCode      = AREA_KEY ? row.key[keyIdx[AREA_KEY]] : 'SSS';
       const candidateCode = row.key[keyIdx[CANDIDATE_KEY]];
       const roundCode     = ROUND_KEY ? row.key[keyIdx[ROUND_KEY]] : undefined;
+      const valintaCode   = VALINTA_KEY ? row.key[keyIdx[VALINTA_KEY]] : undefined;
       if (candidateCode === undefined) continue;
       if (SKIP_CANDIDATE_CODES.has(candidateCode)) continue;
       if (candidateVarIsMixed && !/^\d+$/.test(candidateCode)) continue;
@@ -399,6 +423,7 @@ export function normalizeCandidateByAanestysalue(
         vote_share: vote_share !== undefined && !isNaN(vote_share) ? vote_share : undefined,
       };
       if (roundNum !== undefined) record.round = roundNum;
+      if (valintaCode) record.election_outcome = valintaCode;
       records.push(record);
     }
   }

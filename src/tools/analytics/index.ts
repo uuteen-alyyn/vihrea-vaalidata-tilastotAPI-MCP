@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { loadPartyResults, loadCandidateResults } from '../../data/loaders.js';
+import { computeEnp } from '../../data/normalizer.js';
 import type { ElectionRecord, ElectionType, AreaLevel } from '../../data/types.js';
 import { ELECTION_TYPE_PARAM, subnatLevel, matchesParty, pct, round2, mcpText, errResult } from '../shared.js';
 import { parseKuntaCode } from '../../data/area-hierarchy.js';
@@ -136,6 +137,11 @@ export function registerAnalyticsTools(server: McpServer): void {
 
       const concentration = concentrationMetrics(aalueRows.map((r) => r.votes));
 
+      // Election outcome from Valintatieto (parliamentary, municipal, regional)
+      const rawOutcome = vpRow?.election_outcome ?? candidateRows[0]?.election_outcome;
+      const OUTCOME_MAP: Record<string, string> = { '1': 'elected', '2': 'varalla', '3': 'not_elected' };
+      const election_outcome = rawOutcome ? (OUTCOME_MAP[rawOutcome] ?? 'unknown') : null;
+
       return mcpText({
         candidate_id,
         candidate_name: candidateName,
@@ -143,6 +149,7 @@ export function registerAnalyticsTools(server: McpServer): void {
         year,
         election_type: electionType,
         unit_key: unitLabel,
+        election_outcome,
         total_votes: totalVotes,
         vote_share_pct: vpRow?.vote_share ? pct(vpRow.vote_share) : null,
         rank_overall_in_unit: overallRank || null,
@@ -219,6 +226,7 @@ export function registerAnalyticsTools(server: McpServer): void {
       }));
 
       const concentration = concentrationMetrics(subnatRows.map((r) => r.votes));
+      const election_enp = computeEnp(allNationalRows);
 
       return mcpText({
         party_id,
@@ -228,13 +236,14 @@ export function registerAnalyticsTools(server: McpServer): void {
         national_votes: nationalVotes,
         national_vote_share_pct: nationalShare ? pct(nationalShare) : null,
         total_national_votes_cast: totalNationalVotes,
+        election_enp,
         [`n_${areaLvl}s`]: subnatRows.length,
         [`n_${areaLvl}s_with_votes`]: subnatRows.filter((r) => r.votes > 0).length,
         [`strongest_${areaLvl}s`]: strongest,
         [`weakest_${areaLvl}s`]: weakest,
         geographic_concentration: concentration,
         method: {
-          description: `National total from koko_suomi row. Strongest/weakest based on ${areaLvl}-level rows.`,
+          description: `National total from koko_suomi row. Strongest/weakest based on ${areaLvl}-level rows. election_enp = Laakso-Taagepera ENP from all koko_suomi party rows.`,
           source_table: tableId,
         },
       });
