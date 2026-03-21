@@ -96,108 +96,77 @@ Fully quit and reopen Claude Desktop. You should now see a tools icon (hammer) i
 
 **You're done.** Ask Claude something like: *"Which party got the most votes in Helsinki in the 2023 parliamentary election?"*
 
+For best results, add a system prompt to Claude Desktop that describes the election data context. See [system_prompt.md](system_prompt.md) in this project for a ready-made system prompt to paste in.
+
 ---
 
-## Option B — Deploy on an Azure server
+## Option B — Deploy on Azure App Service
 
-This guide is for deploying the MCP on an Azure virtual machine so anyone in your organization can use it without running anything locally. Claude Desktop will connect to the server over the internet.
+This guide deploys the MCP on Azure App Service (Free or Basic tier) so anyone in your organization can use it without running anything locally.
+
+> **Note:** Azure App Service terminates TLS at the infrastructure level. The Node.js process serves plain HTTP internally; Azure provides the public HTTPS endpoint automatically. No TLS configuration is needed in the app.
 
 ### What you need
 
-- An Azure Linux virtual machine (Ubuntu 22.04 LTS recommended) with:
-  - Port **3000** open in the Network Security Group (NSG) — your Azure admin can do this
-  - A public IP address or DNS name
-- SSH access to the VM
+- An Azure account with permission to create App Service resources
+- [Azure CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli) installed locally (or use Azure Cloud Shell)
 
----
+### Deploy
 
-### Part 1 — Set up the server
-
-SSH into the VM and run these commands one by one.
-
-**1. Install Node.js 20**
+**1. Clone and build locally**
 
 ```bash
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt-get install -y nodejs
-node --version   # should print v20.x.x
-```
-
-**2. Install Git**
-
-```bash
-sudo apt-get install -y git
-```
-
-**3. Download the code**
-
-```bash
-cd ~
 git clone https://github.com/uuteen-alyyn/vihrea-vaalidata-tilastotAPI-MCP.git
 cd vihrea-vaalidata-tilastotAPI-MCP
+npm ci && npm run build
 ```
 
-**4. Install dependencies and build**
+**2. Create a resource group and App Service plan**
 
 ```bash
-npm install
-npm run build
+az group create --name fi-election-rg --location northeurope
+az appservice plan create --name fi-election-plan --resource-group fi-election-rg \
+  --sku F1 --is-linux
 ```
 
-No errors means success. A `dist/` folder will appear.
-
-**5. Install PM2 (process manager — keeps the server running after you log out)**
+**3. Create the web app**
 
 ```bash
-sudo npm install -g pm2
+az webapp create --name YOUR_APP_NAME --resource-group fi-election-rg \
+  --plan fi-election-plan --runtime "NODE:20-lts"
 ```
 
-**6. Start the MCP server**
+Replace `YOUR_APP_NAME` with a globally unique name (e.g. `fi-election-mcp-yourorg`).
+
+**4. Set the start command**
 
 ```bash
-pm2 start npm --name "fi-election-mcp" -- run start:http
-pm2 save
-pm2 startup   # follow the printed instruction to make it survive reboots
+az webapp config set --name YOUR_APP_NAME --resource-group fi-election-rg \
+  --startup-file "node dist/server-http.js"
 ```
 
-**7. Verify it is running**
+**5. Deploy the code**
 
 ```bash
-pm2 status
+az webapp up --name YOUR_APP_NAME --resource-group fi-election-rg
 ```
 
-You should see `fi-election-mcp` with status `online`.
-
-Test from the server itself:
+**6. Verify it is running**
 
 ```bash
-curl -s http://localhost:3000/mcp -X POST \
+curl -s https://YOUR_APP_NAME.azurewebsites.net/mcp -X POST \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}' \
   | head -c 200
 ```
 
-You should get a JSON response (not an error). If so, the server is working.
-
-**8. Open port 3000 in Azure**
-
-In the Azure portal:
-1. Go to your VM → **Networking** → **Network security group**
-2. Click **Add inbound port rule**
-3. Set: Protocol = TCP, Destination port = **3000**, Action = Allow, Priority = 200, Name = `mcp-3000`
-4. Click **Add**
+You should get a JSON response. If so, the server is working.
 
 ---
 
-### Part 2 — Connect Claude Desktop to the server
+### Connect Claude Desktop to the App Service
 
-Do this on each computer that wants to use the MCP.
-
-**1. Find your server's address**
-
-In the Azure portal, go to your VM and copy its **Public IP address** (or DNS name if you set one up). It will look like `20.123.45.67`.
-
-**2. Open Claude Desktop's config file**
+**1. Open Claude Desktop's config file**
 
 | OS | Path |
 |---|---|
@@ -205,51 +174,33 @@ In the Azure portal, go to your VM and copy its **Public IP address** (or DNS na
 | Windows | `%APPDATA%\Claude\claude_desktop_config.json` |
 | Linux | `~/.config/Claude/claude_desktop_config.json` |
 
-Open it in any text editor. Create it if it does not exist.
-
-**3. Add the remote MCP server**
-
-Replace `YOUR_SERVER_IP` with your VM's public IP address:
+**2. Add the remote MCP server**
 
 ```json
 {
   "mcpServers": {
     "fi-election-data": {
-      "url": "http://YOUR_SERVER_IP:3000/mcp"
+      "url": "https://YOUR_APP_NAME.azurewebsites.net/mcp"
     }
   }
 }
 ```
 
-**Example:**
+**3. Restart Claude Desktop**
 
-```json
-{
-  "mcpServers": {
-    "fi-election-data": {
-      "url": "http://20.123.45.67:3000/mcp"
-    }
-  }
-}
-```
+Fully quit and reopen. You should see a tools icon (hammer) in the chat input.
 
-**4. Restart Claude Desktop**
-
-Fully quit and reopen Claude Desktop. You should see a tools icon (hammer) in the chat input. Click it to confirm the election data tools are listed.
-
-**You're done.** The MCP is now running on Azure and Claude Desktop connects to it remotely.
+**You're done.** The MCP is running on Azure App Service and Claude Desktop connects to it remotely.
 
 ---
 
-### Managing the server (reference)
+### Managing the deployment (reference)
 
 | Task | Command |
 |---|---|
-| Check server status | `pm2 status` |
-| View server logs | `pm2 logs fi-election-mcp` |
-| Restart server | `pm2 restart fi-election-mcp` |
-| Stop server | `pm2 stop fi-election-mcp` |
-| Update to latest code | `cd ~/vihrea-vaalidata-tilastotAPI-MCP && git pull && npm run build && pm2 restart fi-election-mcp` |
+| View logs | `az webapp log tail --name YOUR_APP_NAME --resource-group fi-election-rg` |
+| Restart app | `az webapp restart --name YOUR_APP_NAME --resource-group fi-election-rg` |
+| Update to latest code | `git pull && npm run build && az webapp up --name YOUR_APP_NAME --resource-group fi-election-rg` |
 
 ---
 
@@ -258,9 +209,35 @@ Fully quit and reopen Claude Desktop. You should see a tools icon (hammer) in th
 | Election type | Years with party data | Years with candidate data |
 |---|---|---|
 | Parliamentary | 1983–2023 | 2019, 2023 |
-| Municipal | 1976–2025 | 2025 |
+| Municipal | 1976–2025 | 2021, 2025 |
 | Regional (aluevaalit) | 2022, 2025 | 2025 |
 | EU Parliament | 1996–2024 | 2019, 2024 |
 | Presidential | — | 2024 (rounds 1 & 2) |
 
 Data source: [Tilastokeskus PxWeb API](https://pxdata.stat.fi/PXWeb/pxweb/fi/StatFin/)
+
+---
+
+## System prompt
+
+For reliable LLM-driven analysis, add a system prompt to Claude Desktop that explains Finnish electoral context and guides tool selection. Without it, the model may guess area codes, omit required resolution steps, or misinterpret metrics.
+
+A ready-made system prompt is in [system_prompt.md](system_prompt.md).
+
+**How to add it in Claude Desktop:**
+1. Open Claude Desktop → Settings → Model
+2. Paste the contents of `system_prompt.md` into the **System Prompt** field
+3. Save and start a new conversation
+
+---
+
+## Known limitations
+
+| Area | Status |
+|---|---|
+| Election outcome (elected/varalla/not elected) | Available for parliamentary 2023, municipal 2025, regional 2025 via `analyze_candidate_profile`. Not available for EU or presidential. |
+| ENP (Effective Number of Parties) | Computed from votes — exposed in `analyze_party_profile` (`election_enp`) and `get_area_profile` (`area_enp`). Note: vote-ENP differs from seat-ENP in proportional systems. |
+| Incumbent flag | Available for municipal and regional elections only (not parliamentary). Not yet exposed as a tool output. |
+| Presidential party data | Not published by Tilastokeskus — only individual candidate vote totals. |
+| Regional candidate data | 2025 only. Tilastokeskus has no candidate-level tables for aluevaalit 2022. |
+| Parliamentary candidate history | 2019 and 2023 only with full äänestysalue breakdown. Earlier years are in the StatFin_Passiivi archive and not yet mapped. |

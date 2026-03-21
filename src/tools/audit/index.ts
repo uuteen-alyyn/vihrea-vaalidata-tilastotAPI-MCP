@@ -264,6 +264,27 @@ const CAVEATS: Record<string, {
     description: 'EU Parliament elections are second-order elections (Reif & Schmitt 1980): turnout is typically 40% vs 70–75% in Finnish parliamentary elections. The EU electorate is self-selected and not representative of the parliamentary-election electorate. Vote shares and trends from EU elections are structurally incomparable to national elections. Municipal elections further differ by allowing all residents 18+ (including non-citizens) to vote, unlike parliamentary elections which require Finnish citizenship.',
     workaround: 'Always include the election_type field when reporting cross-election comparisons. Cross-type comparability_notes are provided in compare_across_elections output. Treat EU-to-parliamentary trend as directional indicator only, not a direct vote-share comparison.',
   },
+  valintatieto_outcome_coverage: {
+    id: 'valintatieto_outcome_coverage',
+    severity: 'moderate',
+    affects: ['analyze_candidate_profile (field: election_outcome)'],
+    description: 'election_outcome (elected / varalla / not_elected) is sourced from the Valintatieto dimension in Tilastokeskus tables — this is the official, authoritative election outcome as declared by Tilastokeskus. It is available for parliamentary 2023, municipal 2025, and regional 2025. It is null for EU parliament and presidential elections (no Valintatieto dimension in those tables).',
+    workaround: 'For EU elections, a candidate\'s elected status can be inferred from table 14gz (elected MEPs only). For presidential elections, the round-2 winner has >50% of votes. Use election_outcome === null as a signal to check election_type before drawing conclusions.',
+  },
+  incumbent_flag_limited: {
+    id: 'incumbent_flag_limited',
+    severity: 'minor',
+    affects: ['analyze_candidate_profile'],
+    description: 'The incumbent flag (was the candidate a sitting councillor / aluevaltuutettu at the time of the election?) is available in Tilastokeskus tables for municipal (kvaa_kunnanvalt) and regional (alvaa_aluevalt) elections. It is not published for parliamentary elections. The flag is not yet exposed as a field in analyze_candidate_profile output.',
+    workaround: 'For parliamentary incumbency, cross-reference with eduskunta.fi manually. Municipal/regional incumbent data will be added in a future update.',
+  },
+  enp_votes_not_seats: {
+    id: 'enp_votes_not_seats',
+    severity: 'minor',
+    affects: ['analyze_party_profile (field: election_enp)', 'get_area_profile (field: area_enp)'],
+    description: 'ENP (Effective Number of Parties) in this MCP is computed from vote shares, not seat shares (vote-ENP). In a proportional system, vote-ENP and seat-ENP differ because smaller parties may win votes but no seats. Finnish parliamentary vote-ENP is typically 5–7; seat-ENP is lower due to the threshold effect of the D\'Hondt system.',
+    workaround: 'When discussing party system fragmentation in terms of parliamentary power, note that seat allocation reduces ENP relative to the vote share figure. Seat data is not available in this MCP.',
+  },
 };
 
 // ─── Tool registration ────────────────────────────────────────────────────────
@@ -275,7 +296,7 @@ export function registerAuditTools(server: McpServer): void {
     'explain_metric',
     'Returns the definition, formula, unit, and methodology notes for any metric used in this MCP\'s analytics outputs. Use this to understand what a number means before presenting it to a user.',
     {
-      metric: z.string().describe('Metric name to look up. Known metrics: pedersen_index, vote_share, rank_within_party, share_of_party_vote_pct, overperformance_pp, underperformance_pp, top_n_share, composite_score, vote_transfer_proxy. Partial name matching is supported.'),
+      metric: z.string().describe('Metric name to look up. Known metrics: enp, pedersen_index, vote_share, rank_within_party, share_of_party_vote_pct, overperformance_pp, underperformance_pp, top_n_share, composite_score, vote_transfer_proxy. Partial name matching is supported.'),
     },
     async ({ metric }) => {
       const key = metric.toLowerCase().replace(/[^a-z0-9_]/g, '_');

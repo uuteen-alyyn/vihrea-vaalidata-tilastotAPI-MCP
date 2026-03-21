@@ -1287,3 +1287,35 @@ Added to `explain_metric` METRIC_REGISTRY as key `enp` with Laakso-Taagepera (19
 
 **Files changed:** `src/data/types.ts`, `src/data/loaders.ts`, `src/data/normalizer.ts`, `src/tools/analytics/index.ts`, `src/tools/area/index.ts`, `src/tools/audit/index.ts`.
 **Build:** clean. **Tests:** 159/159 passed.
+
+## PHASE T5: SYSTEM PROMPT + README + CAVEAT REGISTRY — 2026-03-21 11:45:00
+
+### system_prompt.md
+
+Written to project root per Section 5 spec (~400 tokens, 5 sections):
+1. Role and data source
+2. Finnish electoral system basics (open-list PR, D'Hondt, vaalipiiri/hyvinvointialue structure)
+3. Recommended call sequence (describe → resolve → fetch → analyze → explain → caveats)
+4. Key constraints (cross-type comparison, candidate_id reuse, area codes, election_outcome coverage)
+5. Three example question → tool chains
+
+### README updates
+
+- Added system prompt note after Option A "You're done" step: link to system_prompt.md
+- Rewrote Option B: replaced Azure Linux VM guide with Azure App Service (NGO free plan) guide, consistent with CLAUDE.md deployment target. Azure TLS termination note added.
+- Fixed data coverage table: Municipal candidate years 2025 → 2021, 2025
+- Added "System prompt" section after data coverage (why, where to paste, link)
+- Added "Known limitations" table: election_outcome coverage, ENP caveat (votes not seats), incumbent flag, presidential party data, regional candidate data, parliamentary candidate history
+
+### audit/index.ts caveat registry additions
+
+Added three new caveats to CAVEATS:
+- `valintatieto_outcome_coverage` (moderate): election_outcome available for parl 2023, municipal 2025, regional 2025 only; null for EU/presidential
+- `incumbent_flag_limited` (minor): available in Tilastokeskus tables for municipal/regional but not yet exposed as a field
+- `enp_votes_not_seats` (minor): ENP computed from votes, not seats; vote-ENP vs seat-ENP divergence in proportional systems
+
+Updated `explain_metric` tool description to advertise `enp` in the known metrics list.
+
+**Files changed:** `system_prompt.md` (new), `README.md`, `src/tools/audit/index.ts`, `Logbook.md`.
+**Build:** clean. **Tests:** 159/159 passed.
+**BACKLOG:** Phase 16 (system prompt test in Claude Desktop) is now ready to execute.
