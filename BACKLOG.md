@@ -16,13 +16,9 @@ Dead code blocks removed. Current tool count: 39 (including new `list_unit_keys`
 All renames done: `get_candidate_trajectory`, `find_vote_decline_areas`, `rank_areas_for_party`.
 All fixes done: `list_elections` presidential area levels, `get_turnout` rows_truncated flag + 5000 cap, `find_area_overperformance` min_votes default 50, `describe_election` regional label → `candidate_units`.
 
----
-
-## 🔴 High priority
-
-### T5 — System prompt + README
-- Write/update `system_prompt.md` (see Implementation_plan_session_2026-03-21.md Stage 5)
-- Update README: fix municipal candidate years (2021, 2025 not just 2025); add system prompt section; add known limitations section; fix Azure deployment description
+### T5 — System prompt + README ✅ DONE (2026-03-21)
+- system_prompt.md rewritten: MCP Resources block, list_unit_keys step, current tool names, 2007/2011 boundary note, compare_across_dimensions example
+- README: parliamentary candidate years corrected to 2007–2023; MCP Resources and MCP Prompts sections added; Known Limitations updated (stale 2019/2023 claim removed)
 
 ---
 
