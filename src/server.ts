@@ -64,7 +64,7 @@ Do **not reconstruct metrics manually** when MCP tools provide them. Treat MCP o
 
 ## Election-specific notes
 
-- **EU elections**: Finland is a single national constituency — no per-vaalipiiri candidate geography.
+- **EU elections**: \`get_candidate_results\` supports area_level \`vaalipiiri\` (all 14 districts, candidate_id optional) and area_level \`aanestysalue\` (full geo breakdown, candidate_id required due to cell limits). Presidential supports area_level \`vaalipiiri\` too.
 - **Presidential**: No party dimension; two rounds (\`round: 1\` / \`round: 2\`).
 - **Regional 2022**: Party data available; candidate-level data not available.
 - **Parliamentary 2011 / 2007**: 15-vaalipiiri boundary (pre-2012 reform). Use \`kymi\`, \`etela-savo\`, \`pohjois-savo\`, \`pohjois-karjala\` instead of \`kaakkois-suomi\` / \`savo-karjala\`.

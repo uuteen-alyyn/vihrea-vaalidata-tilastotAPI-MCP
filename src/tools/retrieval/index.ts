@@ -13,6 +13,9 @@ import {
 import {
   loadPartyResults,
   loadCandidateResults,
+  loadEUCandidateByVaalipiiri,
+  loadEUCandidateByAanestysalue,
+  loadPresidentialByVaalipiiri,
 } from '../../data/loaders.js';
 import { queryElectionData } from '../../data/query-engine.js';
 import { parseOutputMode } from '../../utils/output-mode.js';
@@ -72,33 +75,73 @@ export function registerRetrievalTools(server: McpServer): void {
   // ── get_candidate_results ────────────────────────────────────────────────
   server.tool(
     'get_candidate_results',
-    'Returns candidate vote results for any Finnish election type. ' +
+    'Returns candidate vote results for any Finnish election type at any supported area level. ' +
     'Requires candidate_id from resolve_candidate — do not guess this value. ' +
-    'If unsure of unit_key, call list_unit_keys first to get valid keys for the election. ' +
-    'Parliamentary/municipal: provide unit_key (vaalipiiri, e.g. "helsinki", "uusimaa"). ' +
-    'Regional: provide unit_key (hyvinvointialue, e.g. "pirkanmaa", "varsinais-suomi"). ' +
-    'EU/presidential: omit unit_key or pass "national" — single national table is used. ' +
-    'Presidential: use round=1 or round=2 to filter by round. ' +
-    'Passing a guessed candidate_id returns empty results without error.',
+    '\n\nRouting by election type and area_level:' +
+    '\n- Parliamentary/municipal/regional: provide unit_key (vaalipiiri or hyvinvointialue). ' +
+    'If unsure of unit_key, call list_unit_keys first. Returns äänestysalue breakdown within the unit.' +
+    '\n- EU parliament + area_level="vaalipiiri": returns results across all 14 vaalipiiri. candidate_id optional.' +
+    '\n- EU parliament + area_level="aanestysalue": returns full geographic breakdown. candidate_id REQUIRED (cell limit).' +
+    '\n- EU parliament + no area_level: returns national totals only.' +
+    '\n- Presidential + area_level="vaalipiiri": returns results across all vaalipiiri. candidate_id optional.' +
+    '\n- Presidential + no area_level: returns national totals. Use round=1 or round=2 to filter.',
     {
       year: z.coerce.number().describe('Election year.'),
       election_type: ELECTION_TYPE_PARAM,
-      unit_key: z.string().optional().describe(
-        'Geographic unit key. If unsure, call list_unit_keys(election_type, year) first. ' +
-        'Parliamentary/municipal: vaalipiiri (e.g. "helsinki", "uusimaa", "pirkanmaa"). ' +
-        'Regional: hyvinvointialue (e.g. "varsinais-suomi", "pirkanmaa", "keski-uusimaa"). ' +
-        'EU/presidential: omit or pass "national".'
+      area_level: z.enum(['national', 'vaalipiiri', 'aanestysalue', 'hyvinvointialue']).optional().describe(
+        'Requested area level. ' +
+        'Parliamentary/municipal/regional: omit — area level is determined by unit_key. ' +
+        'EU: "vaalipiiri" for district breakdown, "aanestysalue" for full geo (requires candidate_id). ' +
+        'Presidential: "vaalipiiri" for district breakdown.'
       ),
-      candidate_id: z.string().optional().describe('Candidate code — must come from resolve_candidate. Do not guess.'),
+      unit_key: z.string().optional().describe(
+        'Geographic unit key for parliamentary/municipal/regional. ' +
+        'If unsure, call list_unit_keys(election_type, year) first. ' +
+        'Parliamentary/municipal: vaalipiiri (e.g. "helsinki", "uusimaa"). ' +
+        'Regional: hyvinvointialue (e.g. "varsinais-suomi", "pirkanmaa"). ' +
+        'EU/presidential: omit — use area_level instead.'
+      ),
+      candidate_id: z.string().optional().describe(
+        'Candidate code — must come from resolve_candidate. Do not guess. ' +
+        'Required for EU + area_level="aanestysalue".'
+      ),
       round: z.coerce.number().optional().describe('Presidential elections only: 1 = first round, 2 = second round. Omit for all rounds.'),
       output_mode: z.enum(['data', 'analysis']).optional().describe('data = normalized rows, analysis = summary.'),
     },
-    async ({ year, election_type, unit_key, candidate_id, round, output_mode }) => {
+    async ({ year, election_type, area_level, unit_key, candidate_id, round, output_mode }) => {
       const electionType: ElectionType = election_type ?? 'parliamentary';
       try {
-        const { rows, tableId } = await loadCandidateResults(
-          year, unit_key, candidate_id, electionType, round
-        );
+        let rows: ElectionRecord[];
+        let tableId: string;
+
+        if (electionType === 'eu_parliament') {
+          if (area_level === 'aanestysalue') {
+            if (!candidate_id) {
+              return { content: [{ type: 'text' as const, text: JSON.stringify({
+                error: 'candidate_id is required for EU parliament äänestysalue data — 247 candidates × 2079 areas exceeds the API cell limit without a candidate filter. Resolve the candidate first with resolve_candidate, then pass the candidate_id here.',
+              }) }] };
+            }
+            const result = await loadEUCandidateByAanestysalue(year, candidate_id);
+            rows = result.rows; tableId = result.tableId;
+          } else if (area_level === 'vaalipiiri') {
+            const result = await loadEUCandidateByVaalipiiri(year, candidate_id);
+            rows = result.rows; tableId = result.tableId;
+          } else {
+            // national
+            const result = await loadCandidateResults(year, undefined, candidate_id, electionType, round);
+            rows = result.rows; tableId = result.tableId;
+          }
+        } else if (electionType === 'presidential' && area_level === 'vaalipiiri') {
+          const result = await loadPresidentialByVaalipiiri(year, candidate_id);
+          // filter by round if requested
+          rows = round ? result.rows.filter(r => r.round === round) : result.rows;
+          tableId = result.tableId;
+        } else {
+          // parliamentary / municipal / regional — existing path via unit_key
+          const result = await loadCandidateResults(year, unit_key, candidate_id, electionType, round);
+          rows = result.rows; tableId = result.tableId;
+        }
+
         const source = { table_ids: [tableId], query_timestamp: new Date().toISOString() };
         const mode = parseOutputMode(output_mode);
         if (mode === 'analysis') return buildCandidateAnalysis(rows, year, source);

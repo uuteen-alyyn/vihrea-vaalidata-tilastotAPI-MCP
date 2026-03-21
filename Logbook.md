@@ -1525,3 +1525,24 @@ The system prompt already says to check coverage; LLM needs to be prompted to lo
 
 **Files changed:** src/tools/comparison/index.ts, src/tools/{analytics,area,comparison,demographics,discovery,entity-resolution,retrieval,strategic,audit}/index.ts (coerce), src/server.ts, system_prompt.md, Logbook.md.
 **Build:** clean. **Tests:** 159/159 passed.
+
+---
+
+## STRUCTURAL FIX: get_candidate_results EU/Presidential geographic routing — 2026-03-21
+
+**Problem:** Three loaders existed for EU/presidential geographic data but were orphaned — no tool called them.
+- loadEUCandidateByVaalipiiri (14gx): EU × 14 vaalipiiri
+- loadEUCandidateByAanestysalue (14gw): EU × all äänestysalueet, requires candidate_id
+- loadPresidentialByVaalipiiri (14db): presidential × all vaalipiiri
+`get_candidate_results` only routed to loadCandidateResults (national or per-unit tables).
+
+**Fix:** Added `area_level` parameter to `get_candidate_results` with explicit routing:
+- eu_parliament + area_level=aanestysalue → loadEUCandidateByAanestysalue (enforces candidate_id at tool layer)
+- eu_parliament + area_level=vaalipiiri → loadEUCandidateByVaalipiiri
+- presidential + area_level=vaalipiiri → loadPresidentialByVaalipiiri
+- All other cases: existing loadCandidateResults path unchanged
+
+EU äänestysalue cell-limit constraint (candidate_id required) is now enforced by the tool with a clear error message, not a documentation note.
+
+**Files changed:** src/tools/retrieval/index.ts, src/server.ts, system_prompt.md, Logbook.md.
+**Build:** clean. **Tests:** 159/159 passed.

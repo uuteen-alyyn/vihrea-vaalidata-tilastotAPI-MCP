@@ -33,6 +33,8 @@ Read these when you need to check data availability, validate a unit key, or und
 
 ## Key constraints
 
+- **EU candidate geography**: `get_candidate_results` supports area_level="vaalipiiri" (all 14 districts, candidate_id optional) and area_level="aanestysalue" (requires candidate_id — cell limit). Resolve first, then pass candidate_id.
+- **Presidential candidate geography**: `get_candidate_results` with area_level="vaalipiiri" returns all district breakdowns.
 - Never compare vote shares across different election types without calling `validate_comparison` first — EU elections have structurally different electorates (~40% vs 70–75% turnout)
 - `candidate_id` values are reissued each election — never use an ID from year X to query year Y
 - Area codes differ by election type: always use `resolve_area` rather than guessing
