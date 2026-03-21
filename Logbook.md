@@ -1546,3 +1546,17 @@ EU äänestysalue cell-limit constraint (candidate_id required) is now enforced 
 
 **Files changed:** src/tools/retrieval/index.ts, src/server.ts, system_prompt.md, Logbook.md.
 **Build:** clean. **Tests:** 159/159 passed.
+
+---
+
+## FIX: detect_inactive_high_vote_candidates — year as primary param — 2026-03-21
+
+**Problem:** Tool required `from_year` + `to_year`. LLM passed `reference_year` (wrong name) because it only had one election in mind. `from_year` was undefined, causing validation error.
+
+**Fix:** Added `year` as primary parameter (= the election being analyzed, former `to_year`).
+Added `prevCandidateYear()` helper that looks up the immediately preceding election year with candidate data from the registry.
+`from_year` is now optional — defaults to the preceding election year automatically.
+Both `from_year` and `to_year` remain settable for explicit control.
+
+**Files changed:** src/tools/strategic/index.ts, Logbook.md.
+**Build:** clean. **Tests:** 159/159 passed.

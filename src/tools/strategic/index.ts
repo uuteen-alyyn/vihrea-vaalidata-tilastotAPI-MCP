@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { loadPartyResults, loadCandidateResults } from '../../data/loaders.js';
-import { getElectionTables } from '../../data/election-tables.js';
+import { getElectionTables, ALL_ELECTION_TABLES } from '../../data/election-tables.js';
 import type { ElectionRecord, ElectionType } from '../../data/types.js';
 import { ELECTION_TYPE_PARAM, subnatLevel, matchesParty, pct, round2, mcpText, errResult } from '../shared.js';
 
@@ -21,6 +21,16 @@ function normalizeCandidateName(name: string | undefined): string {
  */
 const MIN_TRANSFER_VOTES = 50;
 
+/** Returns the election year immediately before `year` that has candidate data, or undefined. */
+function prevCandidateYear(electionType: ElectionType, year: number): number | undefined {
+  const years = ALL_ELECTION_TABLES
+    .filter((t) => t.election_type === electionType && (t.candidate_by_aanestysalue || t.candidate_national))
+    .map((t) => t.year)
+    .sort((a, b) => a - b);
+  const idx = years.indexOf(year);
+  return idx > 0 ? years[idx - 1] : undefined;
+}
+
 // ─── Tool registration ────────────────────────────────────────────────────────
 
 export function registerStrategicTools(server: McpServer): void {
@@ -28,18 +38,33 @@ export function registerStrategicTools(server: McpServer): void {
   // ── detect_inactive_high_vote_candidates ─────────────────────────────────
   server.tool(
     'detect_inactive_high_vote_candidates',
-    'Identifies candidates who ran in from_year but did not run in to_year (inactive candidates). Returns their votes, strongest areas, and party — useful for identifying "orphaned" vote pools that may be available for other candidates. Both years must have candidate data in the registry.',
+    'Identifies candidates who ran in a past election but did not run in the target election (inactive candidates). ' +
+    'Returns their votes, strongest areas, and party — useful for identifying "orphaned" vote pools available for other candidates. ' +
+    '\n\nPass year = the election you are targeting (e.g. 2023). ' +
+    'from_year defaults to the immediately preceding election with candidate data — omit it unless you want a specific comparison year.',
     {
-      from_year: z.coerce.number().describe('The reference election year where candidates ran (e.g. 2019).'),
-      to_year: z.coerce.number().describe('The comparison election year. Candidates absent in this year are flagged as inactive (e.g. 2023).'),
+      year: z.coerce.number().describe('The election you are targeting (e.g. 2023 for parliamentary, 2025 for municipal). Candidates absent in this year are flagged as inactive.'),
       election_type: ELECTION_TYPE_PARAM,
       unit_key: z.string().optional().describe('Geographic unit key (vaalipiiri for parliamentary/municipal, hyvinvointialue for regional). Omit for EU/presidential.'),
+      from_year: z.coerce.number().optional().describe('The past election year to look for inactive candidates. Defaults to the immediately preceding election year with candidate data. Override if you want a specific comparison.'),
       party_id: z.string().optional().describe('Filter to candidates from a specific party (abbreviation or code). Omit for all parties.'),
       min_votes: z.coerce.number().optional().describe('Minimum votes in from_year to include in results. Defaults to 100.'),
       limit: z.coerce.number().optional().describe('Maximum number of candidates to return, sorted by votes descending. Defaults to 20.'),
     },
-    async ({ from_year, to_year, election_type, unit_key, party_id, min_votes = 100, limit = 20 }) => {
+    async ({ year, from_year, election_type, unit_key, party_id, min_votes = 100, limit = 20 }) => {
       const electionType: ElectionType = election_type ?? 'parliamentary';
+      const to_year = year;
+      if (!from_year) {
+        const prev = prevCandidateYear(electionType, to_year);
+        if (!prev) {
+          return errResult(`No preceding election with candidate data found for ${electionType} before ${to_year}. Available candidate years: ${
+            ALL_ELECTION_TABLES
+              .filter((t) => t.election_type === electionType && (t.candidate_by_aanestysalue || t.candidate_national))
+              .map((t) => t.year).sort().join(', ')
+          }.`);
+        }
+        from_year = prev;
+      }
       // Validate that candidate tables exist for both years
       const fromTables = getElectionTables(electionType, from_year);
       const toTables = getElectionTables(electionType, to_year);
