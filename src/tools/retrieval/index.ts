@@ -99,7 +99,8 @@ export function registerRetrievalTools(server: McpServer): void {
         'If unsure, call list_unit_keys(election_type, year) first. ' +
         'Parliamentary/municipal: vaalipiiri (e.g. "helsinki", "uusimaa"). ' +
         'Regional: hyvinvointialue (e.g. "varsinais-suomi", "pirkanmaa"). ' +
-        'EU/presidential: omit — use area_level instead.'
+        'EU/presidential: omit — use area_level instead. ' +
+        'WARNING: Omitting unit_key for parliamentary/municipal/regional triggers a slow fan-out across ALL units (12–21 separate API calls, 10–30s). Always call list_unit_keys first and pass the correct unit_key.'
       ),
       candidate_id: z.string().optional().describe(
         'Candidate code — must come from resolve_candidate. Do not guess. ' +
@@ -334,11 +335,11 @@ export function registerRetrievalTools(server: McpServer): void {
         'One or more election years to query. All years are fetched in parallel and merged. ' +
         'Example: [2019, 2023] for two parliamentary elections.'
       ),
-      area_level: z.enum(['koko_suomi', 'vaalipiiri', 'kunta', 'aanestysalue', 'hyvinvointialue']).describe(
-        'Geographic granularity of results. ' +
+      area_level: z.enum(['koko_suomi', 'vaalipiiri', 'kunta', 'aanestysalue', 'hyvinvointialue']).optional().describe(
+        'Geographic granularity of results. Defaults to koko_suomi (national totals). ' +
         'koko_suomi=national total, vaalipiiri=electoral district, kunta=municipality, ' +
         'aanestysalue=voting district, hyvinvointialue=welfare area (regional elections only). ' +
-        'This parameter is required — do not infer it.'
+        'Use vaalipiiri for district breakdowns.'
       ),
       subject_ids: z.array(z.string()).optional().describe(
         'Filter to specific party or candidate IDs (PxWeb codes). Omit for all. ' +
@@ -363,7 +364,7 @@ export function registerRetrievalTools(server: McpServer): void {
           subject_type,
           election_types: election_types as ElectionType[],
           years,
-          area_level: area_level as AreaLevel,
+          area_level: (area_level ?? 'koko_suomi') as AreaLevel,
           subject_ids,
           area_ids,
           round,

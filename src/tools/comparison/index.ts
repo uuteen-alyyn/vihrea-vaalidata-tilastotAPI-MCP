@@ -194,10 +194,10 @@ export function registerComparisonTools(server: McpServer): void {
         '"election": rows=elections, columns=areas. Use when comparing one subject over time. ' +
         '"subject": rows=subjects, columns=elections. Use when comparing multiple parties/candidates.'
       ),
-      area_level: z.enum(['koko_suomi', 'vaalipiiri', 'kunta', 'aanestysalue', 'hyvinvointialue']).describe(
-        'Geographic granularity. Required. ' +
-        'vaalipiiri is most common for cross-election comparisons. ' +
-        'koko_suomi for national totals only.'
+      area_level: z.enum(['koko_suomi', 'vaalipiiri', 'kunta', 'aanestysalue', 'hyvinvointialue']).optional().describe(
+        'Geographic granularity. Defaults to koko_suomi (national totals). ' +
+        'vaalipiiri is most common for cross-election district comparisons. ' +
+        'Use vaalipiiri for district breakdowns.'
       ),
       area_ids: z.array(z.string()).optional().describe(
         'Filter to specific area codes. Omit for all areas at the requested level. ' +
@@ -219,7 +219,7 @@ export function registerComparisonTools(server: McpServer): void {
           subject_ids,
           election_types: uniqueTypes,
           years: uniqueYears,
-          area_level: area_level as AreaLevel,
+          area_level: (area_level ?? 'koko_suomi') as AreaLevel,
           area_ids,
         });
 
@@ -313,9 +313,9 @@ export function registerComparisonTools(server: McpServer): void {
     'score 0.55–0.95 = ambiguous (returned with flag for LLM review, not included in results). ' +
     'score < 0.55 = not found.',
     {
-      query: z.string().describe(
-        'Candidate name to search for (fuzzy matched). ' +
-        'Use the Finnish name format: "Harjanne Atte" or "Atte Harjanne" both work. ' +
+      candidate_query: z.string().describe(
+        'Candidate name or candidate_id to search for. ' +
+        'Use the Finnish name format: "Harjanne Atte" or "Atte Harjanne" both work (fuzzy matched). ' +
         'Or pass a candidate_id (numeric string) for exact lookup.'
       ),
       election_types: z.array(
@@ -331,18 +331,20 @@ export function registerComparisonTools(server: McpServer): void {
         'Optional year filter. If omitted, searches all years with candidate data for each type. ' +
         'Example: [2023, 2024] to limit to recent elections only.'
       ),
-      area_level: z.enum(['koko_suomi', 'vaalipiiri', 'kunta', 'aanestysalue', 'hyvinvointialue']).describe(
-        'Geographic level to return results at. ' +
+      area_level: z.enum(['koko_suomi', 'vaalipiiri', 'kunta', 'aanestysalue', 'hyvinvointialue']).optional().describe(
+        'Geographic level to return results at. Defaults to vaalipiiri. ' +
         'vaalipiiri is the most useful for parliamentary/municipal trajectory analysis. ' +
-        'koko_suomi for national totals only (presidential/EU). Required.'
+        'koko_suomi for national totals only (presidential/EU).'
       ),
       include_party_context: z.boolean().optional().describe(
         'If true, also include how the candidate\'s party performed in the same areas and elections. ' +
         'Adds one extra queryElectionData call per confirmed election. Default: false.'
       ),
     },
-    async ({ query, election_types, years, area_level, include_party_context }) => {
+    async ({ candidate_query, election_types, years, area_level: area_level_param, include_party_context }) => {
+      const area_level = area_level_param ?? 'vaalipiiri';
       try {
+        const query = candidate_query;
         // Pre-compute query normalizations for fast matching
         const qLow = query.toLowerCase().trim();
         const qNorm = normalizeStr(query);

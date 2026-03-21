@@ -171,15 +171,15 @@ export function registerDemographicsTools(server: McpServer): void {
       year: z.coerce.number().describe(
         'Election year. Parliamentary: 2011, 2015, 2019, 2023. Municipal: 2012, 2017, 2021, 2025.'
       ),
-      group: z.enum(['eligible_voters', 'candidates', 'elected']).describe(
-        'Which population to describe. ' +
+      group: z.enum(['eligible_voters', 'candidates', 'elected']).optional().describe(
+        'Which population to describe. Defaults to eligible_voters. ' +
         'eligible_voters = all residents entitled to vote (the electorate). ' +
         'candidates = everyone who ran (all parties combined). ' +
         'elected = officials who won seats. ' +
         'These are three entirely different populations; shares are within-group.'
       ),
-      dimension: z.enum(['employment', 'education', 'employer_sector', 'income_decile', 'language', 'origin']).describe(
-        'Background characteristic to show. ' +
+      dimension: z.enum(['employment', 'education', 'employer_sector', 'income_decile', 'language', 'origin']).optional().describe(
+        'Background characteristic to show. Defaults to employment. ' +
         'employment: employed/unemployed/student/retired/other. ' +
         'education: basic/secondary/lower-tertiary/bachelor/master+. ' +
         'employer_sector: private/state/municipality/entrepreneur. ' +
@@ -195,7 +195,7 @@ export function registerDemographicsTools(server: McpServer): void {
         'data = normalized rows (JSON), analysis = markdown summary table.'
       ),
     },
-    async ({ election_type, year, group, dimension, gender = 'total', output_mode }) => {
+    async ({ election_type, year, group = 'eligible_voters', dimension = 'employment', gender = 'total', output_mode }) => {
       try {
         const rows = await loadVoterBackground(election_type, year, group, dimension);
         const tableId = `statfin_${election_type === 'parliamentary' ? 'evaa' : 'kvaa'}_pxt_${election_type === 'parliamentary' ? '13su' : '14w4'}`;

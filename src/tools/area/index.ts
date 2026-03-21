@@ -71,6 +71,15 @@ export function registerAreaTools(server: McpServer): void {
     },
     async ({ area_id, election_type, reference_year, history_years, top_n = 5 }) => {
       const electionType: ElectionType = election_type ?? 'parliamentary';
+
+      // Validate area_id format matches election_type
+      if (electionType === 'regional' && !area_id.startsWith('HV') && area_id !== 'SSS') {
+        return errResult(`For regional elections, area_id must start with "HV" (e.g. "HV01"). Got "${area_id}". Use resolve_area to find the correct code.`);
+      }
+      if ((electionType === 'parliamentary' || electionType === 'municipal') && area_id.startsWith('HV')) {
+        return errResult(`area_id "${area_id}" looks like a hyvinvointialue code (HV prefix) but election_type is "${electionType}". Parliamentary/municipal areas use 6-digit codes (e.g. "010091") or vaalipiiri codes. Use resolve_area to find the correct code.`);
+      }
+
       const typeYears = DEFAULT_YEARS_BY_TYPE[electionType];
       const defaultRefYear = typeYears[typeYears.length - 1]!;
       const resolvedRefYear = reference_year ?? defaultRefYear;
@@ -190,7 +199,7 @@ export function registerAreaTools(server: McpServer): void {
   // ── compare_areas ─────────────────────────────────────────────────────────
   server.tool(
     'compare_areas',
-    'Side-by-side comparison of two or more geographic areas: top party rankings, vote shares, total votes. All areas must be comparable — e.g. all kunta, or all vaalipiiri.',
+    'Side-by-side comparison of two or more geographic areas in the same election: top party rankings, vote shares, total votes. All areas must be comparable — e.g. all kunta, or all vaalipiiri. Use this for same-election cross-area comparison. For multi-election trends use analyze_area_volatility. For finding municipalities with similar vote patterns use find_comparable_areas.',
     {
       area_ids: z.array(z.string()).min(2).max(8).describe('List of area codes (2–8). Use resolve_area to find codes.'),
       election_type: ELECTION_TYPE_PARAM,
@@ -389,6 +398,15 @@ export function registerAreaTools(server: McpServer): void {
     async ({ year, election_type, subject_type, subject_id, unit_key, min_votes = 10, limit = 15, direction = 'strongholds' }) => {
       const electionType: ElectionType = election_type ?? 'parliamentary';
       const areaLvl = subnatLevel(electionType);
+
+      // Guard: candidates in parliamentary/municipal/regional require unit_key (data is per-unit)
+      if (subject_type === 'candidate' && !unit_key &&
+          (electionType === 'parliamentary' || electionType === 'municipal' || electionType === 'regional')) {
+        return errResult(
+          `unit_key is required for candidate strongholds in ${electionType} elections — candidate data is stored per vaalipiiri/hyvinvointialue. Call list_unit_keys(election_type="${electionType}", year=${year}) to find valid unit keys, then pass the correct one.`
+        );
+      }
+
       if (subject_type === 'party') {
         let rows: ElectionRecord[];
         let tableId: string;
@@ -422,7 +440,6 @@ export function registerAreaTools(server: McpServer): void {
           }));
 
         const nationalRow = rows.find(r => matchesParty(r, subject_id) && r.area_level === 'koko_suomi');
-        const areasKey = direction === 'weak_zones' ? 'weak_zones' : 'strongholds';
 
         return mcpText({
           subject_type: 'party',
@@ -431,7 +448,8 @@ export function registerAreaTools(server: McpServer): void {
           election_type: electionType,
           area_level: areaLvl,
           national_share_pct: nationalRow?.vote_share ? pct(nationalRow.vote_share) : null,
-          [areasKey]: sortedAreas,
+          strongholds: direction === 'strongholds' ? sortedAreas : [],
+          weak_zones: direction === 'weak_zones' ? sortedAreas : [],
           method: { description: `Ranked by vote share ${direction === 'weak_zones' ? 'ascending' : 'descending'}. Min votes filter applied to exclude tiny areas.`, source_table: tableId },
         });
 
@@ -469,7 +487,6 @@ export function registerAreaTools(server: McpServer): void {
             vote_share_pct: pct(r.vote_share!),
           }));
 
-        const candAreasKey = direction === 'weak_zones' ? 'weak_zones' : 'strongholds';
         return mcpText({
           subject_type: 'candidate',
           subject_id,
@@ -479,7 +496,8 @@ export function registerAreaTools(server: McpServer): void {
           election_type: electionType,
           unit_key: unit_key ?? 'national',
           unit_share_pct: vpRow?.vote_share ? pct(vpRow.vote_share) : null,
-          [candAreasKey]: sortedCandAreas,
+          strongholds: direction === 'strongholds' ? sortedCandAreas : [],
+          weak_zones: direction === 'weak_zones' ? sortedCandAreas : [],
           method: { description: `Ranked by vote share ${direction === 'weak_zones' ? 'ascending' : 'descending'} at äänestysalue level. Min votes filter applied.`, source_table: tableId },
         });
       }
@@ -489,7 +507,7 @@ export function registerAreaTools(server: McpServer): void {
   // ── find_comparable_areas ─────────────────────────────────────────────────
   server.tool(
     'find_comparable_areas',
-    'Find municipalities with vote-share patterns most similar to a reference municipality. Fetches party data at kunta level for each requested election, builds a vote-share vector per kunta (one dimension per subject × election pair), normalizes each dimension to [0,1] across all kunnat, then ranks by Euclidean distance from the reference area. Smaller distance = more similar electoral behaviour.',
+    'Find municipalities with vote-share patterns most similar to a reference municipality. Matches by historical vote-share pattern (Euclidean distance), NOT by demographics or persuadability. For voter demographics use get_voter_background. Fetches party data at kunta level for each requested election, builds a vote-share vector per kunta (one dimension per subject × election pair), normalizes each dimension to [0,1] across all kunnat, then ranks by Euclidean distance from the reference area. Smaller distance = more similar electoral behaviour.',
     {
       reference_area_id: z.string().describe('area_id of the reference municipality in the format returned by query_election_data at kunta level (e.g. "KU837" for Tampere from 13t2/14vm tables, or the 6-digit code from multi-year tables).'),
       subjects: z.array(z.string()).min(1).max(10).describe('Party IDs to include in the similarity vector (e.g. ["VIHR", "SDP"]). Each subject × election pair becomes one dimension.'),

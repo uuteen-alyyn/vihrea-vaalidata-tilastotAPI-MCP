@@ -71,10 +71,10 @@ export function registerStrategicTools(server: McpServer): void {
 
       const unitLabel = unit_key ?? 'national';
       if (!fromTables?.candidate_by_aanestysalue && !fromTables?.candidate_national) {
-        return errResult(`No candidate data for ${electionType} ${from_year}.`);
+        return errResult(`No candidate data for ${electionType} ${from_year}.`, 'Read election://coverage for available candidate years.');
       }
       if (!toTables?.candidate_by_aanestysalue && !toTables?.candidate_national) {
-        return errResult(`No candidate data for ${electionType} ${to_year}.`);
+        return errResult(`No candidate data for ${electionType} ${to_year}.`, 'Read election://coverage for available candidate years.');
       }
       if (unit_key && fromTables?.candidate_by_aanestysalue && !fromTables.candidate_by_aanestysalue[unit_key]) {
         return errResult(`Unknown unit "${unit_key}" for ${electionType} ${from_year}. Valid: ${Object.keys(fromTables.candidate_by_aanestysalue).join(', ')}.`);
@@ -185,13 +185,13 @@ export function registerStrategicTools(server: McpServer): void {
     {
       party_id: z.string().describe('The party whose lost votes represent an opportunity.'),
       election_type: ELECTION_TYPE_PARAM,
-      year1: z.coerce.number().describe('The earlier election year (baseline).'),
-      year2: z.coerce.number().describe('The later election year (comparison).'),
+      baseline_year: z.coerce.number().describe('The earlier election year (baseline).'),
+      comparison_year: z.coerce.number().describe('The later election year (comparison).'),
       min_vote_loss_pp: z.coerce.number().optional().describe('Minimum vote share loss in pp to flag an area. Defaults to 3.'),
-      min_votes_year1: z.coerce.number().optional().describe('Minimum votes in year1 to include an area. Defaults to 50.'),
+      min_votes_baseline: z.coerce.number().optional().describe('Minimum votes in baseline_year to include an area. Defaults to 50.'),
       limit: z.coerce.number().optional().describe('Maximum areas to return. Defaults to 30.'),
     },
-    async ({ party_id, election_type, year1, year2, min_vote_loss_pp = 3, min_votes_year1 = 50, limit = 30 }) => {
+    async ({ party_id, election_type, baseline_year, comparison_year, min_vote_loss_pp = 3, min_votes_baseline = 50, limit = 30 }) => {
       const electionType: ElectionType = election_type ?? 'parliamentary';
       const areaLvl = subnatLevel(electionType);
       let rows1: ElectionRecord[];
@@ -199,21 +199,21 @@ export function registerStrategicTools(server: McpServer): void {
       let tableId: string;
 
       try {
-        const r1 = await loadPartyResults(year1, undefined, electionType);
+        const r1 = await loadPartyResults(baseline_year, undefined, electionType);
         rows1 = r1.rows;
         tableId = r1.tableId;
       } catch (err) {
-        return errResult(`Failed to load ${year1} data: ${String(err)}`);
+        return errResult(`Failed to load ${baseline_year} data: ${String(err)}`, 'Read election://coverage for available years.');
       }
       try {
-        const r2 = await loadPartyResults(year2, undefined, electionType);
+        const r2 = await loadPartyResults(comparison_year, undefined, electionType);
         rows2 = r2.rows;
       } catch (err) {
-        return errResult(`Failed to load ${year2} data: ${String(err)}`);
+        return errResult(`Failed to load ${comparison_year} data: ${String(err)}`, 'Read election://coverage for available years.');
       }
 
-      const kunta1 = rows1.filter((r) => matchesParty(r, party_id) && r.area_level === areaLvl && r.votes >= min_votes_year1);
-      if (kunta1.length === 0) return errResult(`Party "${party_id}" not found in ${electionType} ${year1}.`);
+      const kunta1 = rows1.filter((r) => matchesParty(r, party_id) && r.area_level === areaLvl && r.votes >= min_votes_baseline);
+      if (kunta1.length === 0) return errResult(`Party "${party_id}" not found in ${electionType} ${baseline_year}.`, 'Read election://coverage for available years.');
 
       const kunta2Map = new Map<string, ElectionRecord>();
       rows2.filter((r) => matchesParty(r, party_id) && r.area_level === areaLvl)
@@ -230,10 +230,10 @@ export function registerStrategicTools(server: McpServer): void {
           return {
             area_id: r1.area_id,
             area_name: r1.area_name,
-            votes_year1: r1.votes,
-            votes_year2: r2?.votes ?? null,
-            vote_share_year1_pct: share1 ? pct(share1) : null,
-            vote_share_year2_pct: share2 ? pct(share2) : null,
+            votes_baseline: r1.votes,
+            votes_comparison: r2?.votes ?? null,
+            vote_share_baseline_pct: share1 ? pct(share1) : null,
+            vote_share_comparison_pct: share2 ? pct(share2) : null,
             vote_share_loss_pp: loss_pp,
           };
         })
@@ -242,7 +242,7 @@ export function registerStrategicTools(server: McpServer): void {
         .slice(0, limit);
 
       const netVoteCountChange = exposed.reduce(
-        (s, a) => s + ((a.votes_year2 ?? 0) - (a.votes_year1 ?? 0)),
+        (s, a) => s + ((a.votes_comparison ?? 0) - (a.votes_baseline ?? 0)),
         0
       );
       const totalSharePointsLost = exposed.reduce(
@@ -252,17 +252,17 @@ export function registerStrategicTools(server: McpServer): void {
 
       return mcpText({
         party_id,
-        year1,
-        year2,
+        baseline_year,
+        comparison_year,
         min_vote_loss_pp,
         n_exposed_areas: exposed.length,
         net_vote_count_change_in_exposed_areas: netVoteCountChange,
         net_vote_count_change_note: 'Positive = raw votes gained; negative = raw votes lost. Can be positive even when share fell (e.g. higher turnout). Not equivalent to "lost votes".',
         total_share_points_lost_in_exposed_areas: round2(totalSharePointsLost),
         exposed_areas: exposed,
-        strategic_note: `These ${exposed.length} areas saw ${party_id} lose ≥${min_vote_loss_pp}pp of vote share between ${year1} and ${year2}, representing structural weakening. The cause may be demobilisation (own voters abstaining) or persuasion loss (voters switching to another party) — cross-reference with estimate_vote_transfer_proxy and get_turnout to distinguish these scenarios before targeting campaign resources.`,
+        strategic_note: `These ${exposed.length} areas saw ${party_id} lose ≥${min_vote_loss_pp}pp of vote share between ${baseline_year} and ${comparison_year}, representing structural weakening. The cause may be demobilisation (own voters abstaining) or persuasion loss (voters switching to another party) — cross-reference with estimate_vote_transfer_proxy and get_turnout to distinguish these scenarios before targeting campaign resources.`,
         method: {
-          description: `Exposed = ${areaLvl} where party vote share fell by ≥ min_vote_loss_pp between year1 and year2.`,
+          description: `Exposed = ${areaLvl} where party vote share fell by ≥ min_vote_loss_pp between baseline_year and comparison_year.`,
           source_table: tableId,
           confidence: 'structural indicator',
         },
@@ -275,15 +275,15 @@ export function registerStrategicTools(server: McpServer): void {
     'estimate_vote_transfer_proxy',
     'Estimates where votes moved between two elections using area-level vote changes as a structural proxy. Compares how much one party gained vs. how much another lost in the same areas. This is NOT a causal measurement — it is an inference from aggregate election results.',
     {
-      losing_party_id: z.string().describe('Party that lost votes between year1 and year2 (the "source" of transferring votes).'),
+      losing_party_id: z.string().describe('Party that lost votes between baseline_year and comparison_year (the "source" of transferring votes).'),
       gaining_party_id: z.string().describe('Party that gained votes (the potential "destination").'),
       election_type: ELECTION_TYPE_PARAM,
-      year1: z.coerce.number().describe('Earlier election year.'),
-      year2: z.coerce.number().describe('Later election year.'),
+      baseline_year: z.coerce.number().describe('Earlier election year.'),
+      comparison_year: z.coerce.number().describe('Later election year.'),
       area_id: z.string().optional().describe('Restrict to a specific area. Omit to analyse at sub-national level.'),
-      min_votes: z.coerce.number().optional().describe('Minimum votes in year1 to include an area. Defaults to 50.'),
+      min_votes: z.coerce.number().optional().describe('Minimum votes in baseline_year to include an area. Defaults to 50.'),
     },
-    async ({ losing_party_id, gaining_party_id, election_type, year1, year2, area_id, min_votes = 50 }) => {
+    async ({ losing_party_id, gaining_party_id, election_type, baseline_year, comparison_year, area_id, min_votes = 50 }) => {
       const electionType: ElectionType = election_type ?? 'parliamentary';
       const areaLvl = subnatLevel(electionType);
       let rows1: ElectionRecord[];
@@ -291,25 +291,25 @@ export function registerStrategicTools(server: McpServer): void {
       let tableId: string;
 
       try {
-        const r1 = await loadPartyResults(year1, area_id, electionType);
+        const r1 = await loadPartyResults(baseline_year, area_id, electionType);
         rows1 = r1.rows;
         tableId = r1.tableId;
       } catch (err) {
-        return errResult(`Failed to load ${year1} data: ${String(err)}`);
+        return errResult(`Failed to load ${baseline_year} data: ${String(err)}`, 'Read election://coverage for available years.');
       }
       try {
-        const r2 = await loadPartyResults(year2, area_id, electionType);
+        const r2 = await loadPartyResults(comparison_year, area_id, electionType);
         rows2 = r2.rows;
       } catch (err) {
-        return errResult(`Failed to load ${year2} data: ${String(err)}`);
+        return errResult(`Failed to load ${comparison_year} data: ${String(err)}`, 'Read election://coverage for available years.');
       }
 
       const level = area_id ? undefined : areaLvl;
 
       const loser1 = rows1.filter((r) => matchesParty(r, losing_party_id) && (!level || r.area_level === level) && r.votes >= min_votes);
       const gainer1 = rows1.filter((r) => matchesParty(r, gaining_party_id) && (!level || r.area_level === level));
-      if (loser1.length === 0) return errResult(`Party "${losing_party_id}" not found in ${year1}.`);
-      if (gainer1.length === 0) return errResult(`Party "${gaining_party_id}" not found in ${year1}.`);
+      if (loser1.length === 0) return errResult(`Party "${losing_party_id}" not found in ${baseline_year}.`, 'Read election://coverage for available years.');
+      if (gainer1.length === 0) return errResult(`Party "${gaining_party_id}" not found in ${baseline_year}.`, 'Read election://coverage for available years.');
 
       const loser2Map = new Map<string, ElectionRecord>();
       const gainer2Map = new Map<string, ElectionRecord>();
@@ -327,11 +327,11 @@ export function registerStrategicTools(server: McpServer): void {
           return {
             area_id: l1.area_id,
             area_name: l1.area_name,
-            loser_votes_year1: l1.votes,
-            loser_votes_year2: l2?.votes ?? null,
+            loser_votes_baseline: l1.votes,
+            loser_votes_comparison: l2?.votes ?? null,
             loser_change,
-            gainer_votes_year1: g1?.votes ?? null,
-            gainer_votes_year2: g2?.votes ?? null,
+            gainer_votes_baseline: g1?.votes ?? null,
+            gainer_votes_comparison: g2?.votes ?? null,
             gainer_change,
             co_movement: (loser_change !== null && gainer_change !== null)
               ? (
@@ -381,8 +381,8 @@ export function registerStrategicTools(server: McpServer): void {
         confidence: 'structural indicator',
         losing_party: losing_party_id,
         gaining_party: gaining_party_id,
-        year1,
-        year2,
+        baseline_year,
+        comparison_year,
         national_summary: {
           loser_vote_change: loserNationalChange,
           gainer_vote_change: gainerNationalChange,
@@ -413,7 +413,7 @@ export function registerStrategicTools(server: McpServer): void {
           'Note: even a high co-movement rate does not prove voter transfer — it shows aggregate co-movement consistent with transfer. Compare these results to survey-based voter transition studies before drawing conclusions.',
         ],
         method: {
-          description: `Area co-movement analysis: for each ${areaLvl}, check if losing_party votes fell AND gaining_party votes rose between year1 and year2.`,
+          description: `Area co-movement analysis: for each ${areaLvl}, check if losing_party votes fell AND gaining_party votes rose between baseline_year and comparison_year.`,
           source_table: tableId,
           proxy_method: 'election result inference',
           confidence: 'structural indicator',
@@ -446,7 +446,7 @@ export function registerStrategicTools(server: McpServer): void {
         refRows = r.rows;
         tableId = r.tableId;
       } catch (err) {
-        return errResult(`Failed to load ${reference_year} data: ${String(err)}`);
+        return errResult(`Failed to load ${reference_year} data: ${String(err)}`, 'Read election://coverage for available years.');
       }
 
       if (trend_year) {
@@ -461,7 +461,7 @@ export function registerStrategicTools(server: McpServer): void {
 
       const nationalRow = refRows.find((r) => matchesParty(r, party_id) && r.area_level === 'koko_suomi');
       const nationalShare = nationalRow?.vote_share;
-      if (!nationalShare) return errResult(`Party "${party_id}" not found in ${electionType} ${reference_year}.`);
+      if (!nationalShare) return errResult(`Party "${party_id}" not found in ${electionType} ${reference_year}.`, 'Read election://coverage for available years.');
 
       const allSubnatRows = refRows.filter((r) => r.area_level === areaLvl);
       const allVotesByArea = new Map<string, number>();
@@ -472,7 +472,7 @@ export function registerStrategicTools(server: McpServer): void {
       const partyKunta = refRows.filter(
         (r) => matchesParty(r, party_id) && r.area_level === areaLvl && r.votes >= min_votes
       );
-      if (partyKunta.length === 0) return errResult(`No ${areaLvl} data found for "${party_id}" in ${electionType} ${reference_year}.`);
+      if (partyKunta.length === 0) return errResult(`No ${areaLvl} data found for "${party_id}" in ${electionType} ${reference_year}.`, 'Read election://coverage for available years.');
 
       const trendMap = new Map<string, number>();
       if (trendRows) {
@@ -558,7 +558,8 @@ export function registerStrategicTools(server: McpServer): void {
         reference_year,
         trend_year: trend_year ?? null,
         national_share_pct: pct(nationalShare),
-        [`n_${areaLvl}s_scored`]: scored.length,
+        areas_scored: scored.length,
+        area_level: areaLvl,
         top_target_areas: ranked,
         scoring_methodology: {
           description: 'Composite score = weighted average of 3 independent components (all 0–1).',

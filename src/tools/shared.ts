@@ -58,6 +58,6 @@ export function mcpText(obj: unknown) {
   return { content: [{ type: 'text' as const, text: JSON.stringify(obj, null, 2) }] };
 }
 
-export function errResult(msg: string) {
-  return mcpText({ error: msg });
+export function errResult(msg: string, hint?: string) {
+  return mcpText(hint ? { error: msg, hint } : { error: msg });
 }

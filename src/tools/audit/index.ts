@@ -296,9 +296,15 @@ export function registerAuditTools(server: McpServer): void {
     'explain_metric',
     'Returns the definition, formula, unit, and methodology notes for any metric used in this MCP\'s analytics outputs. Use this to understand what a number means before presenting it to a user.',
     {
-      metric: z.string().describe('Metric name to look up. Known metrics: enp, pedersen_index, vote_share, rank_within_party, share_of_party_vote_pct, overperformance_pp, underperformance_pp, top_n_share, composite_score, vote_transfer_proxy. Partial name matching is supported.'),
+      metric: z.string().optional().describe('Metric name to look up. Omit to list all available metrics. Known metrics: enp, pedersen_index, vote_share, rank_within_party, share_of_party_vote_pct, overperformance_pp, underperformance_pp, top_n_share, composite_score, vote_transfer_proxy. Partial name matching is supported.'),
     },
     async ({ metric }) => {
+      if (!metric) {
+        return mcpText({
+          available_metrics: Object.entries(METRIC_REGISTRY).map(([k, v]) => ({ key: k, name: v.name, used_in: v.used_in })),
+          hint: 'Pass metric="<key>" to get the full definition and formula.',
+        });
+      }
       const key = metric.toLowerCase().replace(/[^a-z0-9_]/g, '_');
 
       // Exact match first
@@ -333,7 +339,7 @@ export function registerAuditTools(server: McpServer): void {
   // ── trace_result_lineage ──────────────────────────────────────────────────
   server.tool(
     'trace_result_lineage',
-    'Returns the data provenance for a tool\'s output: which Tilastokeskus source table was used, what variables were queried, how the data was normalized, and what transformations were applied. Use this to verify methodology or audit a specific result.',
+    'Returns the data provenance for a tool\'s output: the source Tilastokeskus table ID, variable selection (Vuosi/Sukupuoli/Alue filters), normalization steps (how raw PxWeb rows are mapped to ElectionRecord schema), transformations applied (e.g. metric computations, aggregations), and caveats. Use this to verify methodology or audit a specific result before presenting it.',
     {
       tool_name: z.string().describe('Name of the MCP tool to trace (e.g. "analyze_candidate_profile", "compare_elections", "estimate_vote_transfer_proxy").'),
     },
