@@ -400,4 +400,71 @@ export function registerDiscoveryTools(server: McpServer): void {
       };
     }
   );
+
+  // ── search_tools ──────────────────────────────────────────────────────────
+  server.tool(
+    'search_tools',
+    'Search for tools by keyword. Returns the top matching tool names and one-line descriptions. ' +
+    'Use this when you are unsure which tool to call — search for a concept (e.g. "candidate profile", "volatility", "unit key", "turnout") to find relevant tools.',
+    {
+      query: z.string().max(200).describe('Keyword or phrase to search for (e.g. "candidate profile", "party rankings", "vaalipiiri", "turnout demographics").'),
+      limit: z.number().optional().describe('Maximum number of results to return. Defaults to 5.'),
+    },
+    async ({ query, limit = 5 }) => {
+      // Access the internal tool registry from the MCP SDK
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const registered: Record<string, { name: string; description?: string }> =
+        (server as unknown as Record<string, unknown>)['_registeredTools'] as Record<string, { name: string; description?: string }>;
+
+      if (!registered) {
+        return { content: [{ type: 'text' as const, text: JSON.stringify({ error: 'Tool registry not accessible.' }) }] };
+      }
+
+      const queryLow = query.toLowerCase();
+      const queryTokens = queryLow.split(/\s+/).filter(Boolean);
+
+      // Score each tool: exact name match > token match in name > token match in description
+      const scored = Object.values(registered)
+        .filter((t) => t.name !== 'search_tools') // exclude self
+        .map((t) => {
+          const nameLow = t.name.toLowerCase();
+          const descLow = (t.description ?? '').toLowerCase();
+
+          let score = 0;
+          // Exact substring in name: high weight
+          if (nameLow.includes(queryLow)) score += 10;
+          // Token matches
+          for (const token of queryTokens) {
+            if (nameLow.includes(token)) score += 4;
+            if (descLow.includes(token)) score += 1;
+          }
+          return { name: t.name, description: t.description ?? '', score };
+        })
+        .filter((t) => t.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, limit);
+
+      if (scored.length === 0) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({
+              results: [],
+              note: `No tools matched "${query}". Try broader terms like "candidate", "party", "area", "turnout", "compare", "resolve".`,
+            }),
+          }],
+        };
+      }
+
+      return {
+        content: [{
+          type: 'text' as const,
+          text: JSON.stringify({
+            query,
+            results: scored.map((t) => ({ name: t.name, description: t.description })),
+          }),
+        }],
+      };
+    }
+  );
 }

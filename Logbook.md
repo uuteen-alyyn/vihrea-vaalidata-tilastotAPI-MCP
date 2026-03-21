@@ -1405,3 +1405,32 @@ Demographics (2): get_voter_background, get_voter_turnout_by_demographics
 
 **Files changed:** `src/tools/analytics/index.ts`, `src/tools/area/index.ts`, `BACKLOG.md`, `Logbook.md`.
 **Build:** clean. **Tests:** 159/159 passed.
+
+---
+
+## STAGES 4, 5, 6: MCP RESOURCES + SYSTEM PROMPT + SEARCH_TOOLS — 2026-03-21
+
+**Stage 4 — MCP Resources:**
+New file `src/resources/index.ts` registers three read-only resources:
+- `election://coverage` — data availability by election type and year, derived live from ALL_ELECTION_TABLES
+- `election://unit-keys` — valid unit_key values by election type and year, derived live from registry
+- `election://metrics` — definitions and formulas for all computed metrics (ENP, Pedersen, vote share, etc.)
+Resources registered via `server.resource()`. Connected to `registerAllTools()` in `server.ts`.
+
+**Stage 5 — System prompt rewrite:**
+`SYSTEM_PROMPT` in `server.ts` rewritten:
+- References to removed tools (compare_elections, get_top_n, find_weak_zones, etc.) removed
+- Workflow updated to point to `list_unit_keys` and `election://unit-keys` resource
+- Coverage table kept as summary; full detail delegated to `election://coverage`
+- Unit key lists removed (now in resource); demographics section condensed
+- Workflow steps reordered to lead with Discover before Resolve
+
+**Stage 6 — search_tools meta-tool:**
+New `search_tools(query, limit)` tool added to `discovery/index.ts`.
+- Reads the live `_registeredTools` registry from the MCP SDK at call time — no static copy to maintain
+- Scores by: exact name substring (10), token match in name (4 each), token match in description (1 each)
+- Returns top-N results with name + description only (no schema details)
+- Excludes itself from results
+
+**Files changed:** `src/resources/index.ts` (new), `src/server.ts`, `src/tools/discovery/index.ts`, `Logbook.md`.
+**Build:** clean. **Tests:** 159/159 passed. **Active tools:** 40.
