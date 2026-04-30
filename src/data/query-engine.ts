@@ -44,6 +44,17 @@ export interface QueryElectionDataParams {
   area_ids?: string[];
   /** Presidential round: 1 = first round, 2 = runoff. Undefined = all rounds. */
   round?: number;
+  /**
+   * Return only the top N rows by `top_by` (descending). Applied AFTER all
+   * upstream filters (subject_ids / area_ids / round) and AFTER fan-out
+   * merging — purely a post-filter on the merged result. Does NOT shrink
+   * the upstream PxWeb request, so cannot rescue queries that exceed the
+   * cell-count cap before any rows come back. Use a narrow `area_level` +
+   * `area_ids` first if the broad query 403s.
+   */
+  top_n?: number;
+  /** Metric to sort by when `top_n` is set. Default: 'votes'. */
+  top_by?: 'votes' | 'vote_share';
 }
 
 export interface QueryElectionDataResult {
@@ -287,8 +298,37 @@ export async function queryElectionData(
   }
 
   return {
-    rows: allRows,
+    rows: applyTopN(allRows, params.top_n, params.top_by),
     table_ids: [...allTableIds],
     skipped_elections: skipped,
   };
+}
+
+/**
+ * Sort the merged row list by `top_by` descending and slice to the top
+ * `top_n`. Pure post-filter — runs after fan-out merging, not before; does
+ * NOT shrink the upstream PxWeb request, so cannot rescue cell-count
+ * failures (those happen during fetch, before any rows reach this function).
+ *
+ * Rows missing the chosen metric (e.g. `vote_share` undefined for some
+ * election types) sort to the bottom so they don't crowd out rows that
+ * have valid values.
+ */
+export function applyTopN(
+  rows: ElectionRecord[],
+  top_n?: number,
+  top_by: 'votes' | 'vote_share' = 'votes',
+): ElectionRecord[] {
+  if (top_n === undefined || top_n <= 0) return rows;
+  const sorted = [...rows].sort((a, b) => {
+    const av = top_by === 'vote_share' ? a.vote_share : a.votes;
+    const bv = top_by === 'vote_share' ? b.vote_share : b.votes;
+    const aHas = typeof av === 'number';
+    const bHas = typeof bv === 'number';
+    if (!aHas && !bHas) return 0;
+    if (!aHas) return 1;
+    if (!bHas) return -1;
+    return (bv as number) - (av as number);
+  });
+  return sorted.slice(0, top_n);
 }

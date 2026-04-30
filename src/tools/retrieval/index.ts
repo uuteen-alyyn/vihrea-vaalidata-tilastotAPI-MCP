@@ -320,7 +320,13 @@ export function registerRetrievalTools(server: McpServer): void {
     'EU parliament: vaalipiiri/koko_suomi level via 14gx; äänestysalue level requires subject_ids. ' +
     'Presidential: all area levels from one national table. ' +
     '\n\nUse this tool for: cross-election party comparisons, candidate results across years, ' +
-    'multi-year trends at any geographic level.',
+    'multi-year trends at any geographic level.' +
+    '\n\nCell-count cap: PxWeb rejects requests whose dimension product exceeds its per-request cap ' +
+    '(error surfaces as 403 / "too many cells"). The biggest offenders are vaalipiiri-wide candidate ' +
+    'queries with all candidates × all äänestysalue (e.g. all Uusimaa kuntavaalit 2025 candidates). ' +
+    'For "top vote-getter in city X" questions, narrow first: area_level="kunta" + area_ids=["KU###"] ' +
+    'restricts the request to one municipality (~100 cells), then top_n trims the response. ' +
+    'See top_n / top_by parameters below.',
     {
       subject_type: z.enum(['party', 'candidate']).describe(
         'Type of subject. "party" = party vote results. "candidate" = individual candidate results.'
@@ -357,8 +363,21 @@ export function registerRetrievalTools(server: McpServer): void {
       output_mode: z.enum(['rows', 'analysis']).optional().describe(
         'rows = normalized ElectionRecord rows (default). analysis = summary table with totals.'
       ),
+      top_n: z.coerce.number().int().positive().optional().describe(
+        'Return only the top N rows by `top_by` (descending). Applied AFTER all ' +
+        'other filters (subject_ids, area_ids, round) and AFTER per-election fan-out merging. ' +
+        'Use this for "top vote-getter in X" queries — e.g. "Hyvinkään ääniharava" is area_level="kunta" + ' +
+        'area_ids=["KU106"] + top_n=10. ' +
+        'NOTE: top_n is a post-filter — it does NOT shrink the upstream PxWeb request, so it ' +
+        'cannot rescue queries that exceed the cell-count cap (e.g. all Uusimaa kuntavaalit candidates ' +
+        'with no kunta filter). Narrow with area_level + area_ids first; top_n then trims the result.'
+      ),
+      top_by: z.enum(['votes', 'vote_share']).optional().describe(
+        'Metric to sort by when `top_n` is set. "votes" = absolute vote count (default). ' +
+        '"vote_share" = percentage. Rows missing the chosen metric sort to the bottom.'
+      ),
     },
-    async ({ subject_type, election_types, years, area_level, subject_ids, area_ids, round, output_mode }) => {
+    async ({ subject_type, election_types, years, area_level, subject_ids, area_ids, round, output_mode, top_n, top_by }) => {
       try {
         const result = await queryElectionData({
           subject_type,
@@ -368,6 +387,8 @@ export function registerRetrievalTools(server: McpServer): void {
           subject_ids,
           area_ids,
           round,
+          top_n,
+          top_by,
         });
 
         const source = {

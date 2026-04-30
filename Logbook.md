@@ -1560,3 +1560,62 @@ Both `from_year` and `to_year` remain settable for explicit control.
 
 **Files changed:** src/tools/strategic/index.ts, Logbook.md.
 **Build:** clean. **Tests:** 159/159 passed.
+
+---
+
+## ENTRY QUERY_ELECTION_DATA: TOP_N + TOP_BY POST-FILTERS 2026-04-30 16:00:00
+
+Vihrea-MCP umbrella's Phase-3-step-8 retest surfaced a recurring user pattern claude.ai cannot satisfy through the current tool surface: "Hyvinkään ääniharavaa Vihreistä?" (top vote-getter of the Greens in Hyvinkää municipality, kuntavaalit 2025). Vaalipiiri-wide queries for Uusimaa exceed PxWeb's per-request cell-count cap and 403; the alternative — narrowing to one kunta — works but returns ALL ~100 candidates in that kunta, far more than needed.
+
+### Change
+
+`query_election_data` and the underlying `queryElectionData` engine gain two optional post-filter parameters:
+
+- **`top_n: number`** — return only the top N rows from the merged result, sorted by `top_by` descending.
+- **`top_by: 'votes' | 'vote_share'`** — metric to sort by. Default `'votes'`.
+
+Applied AFTER all existing filters (`subject_ids`, `area_ids`, `round`) and AFTER per-election fan-out merging. Pure post-filter — does NOT shrink the upstream PxWeb request, so cannot rescue queries that exceed the cell-count cap before any rows come back.
+
+### Implementation
+
+**`src/data/query-engine.ts`:**
+- New optional fields on `QueryElectionDataParams`.
+- Refactored the filter into an exported pure function `applyTopN(rows, top_n, top_by)` so it's testable in isolation without mocking the upstream loaders.
+- Rows missing the chosen metric (e.g. `vote_share` undefined for some election types) sort to the bottom — they don't crowd out rows that have valid values.
+- Input array not mutated; `[...rows].sort(...)` makes a copy first.
+
+**`src/tools/retrieval/index.ts`:**
+- Two new `z.coerce.number().int().positive().optional()` / `z.enum().optional()` parameters with descriptive Zod text.
+- Tool description gains a new paragraph explaining the cell-count cap and the narrow-then-top_n pattern, so an LLM consumer can self-recover from a 403 by narrowing instead of bouncing off the same cap on retry.
+
+### Tests
+
+`src/data/query-engine.test.ts` (new): 10 cases for `applyTopN` covering:
+- Pass-through when `top_n` undefined / 0 / negative (returns input by reference, no allocation)
+- Sort by `votes` desc + slice
+- Sort by `vote_share` desc
+- `top_n` exceeding row count returns all rows
+- Input array NOT mutated
+- Rows missing the metric sort to the bottom
+- All-undefined metric handled gracefully (no crash)
+- Ties don't crash (input order on ties is acceptable)
+
+### What it does NOT do
+
+- Does not pre-filter the upstream PxWeb request. PxWeb has no equivalent of `top_n` in its query API; we'd have to fan out to every äänestysalue, fetch all rows, then sort — exactly what `top_n` already does, but with the same upstream load. The right escape valve for over-broad queries is the `area_level` + `area_ids` narrowing the description now teaches.
+- Does not change behaviour when `top_n` is omitted. Existing callers see no difference.
+
+### Files changed
+
+- `src/data/query-engine.ts` — new params + `applyTopN` exported function
+- `src/tools/retrieval/index.ts` — Zod schema + tool description + handler plumbing
+- `src/data/query-engine.test.ts` — new file, 10 unit tests
+- `Logbook.md` — this entry
+
+### Build / tests
+
+`npm run build` clean (no TS errors). `npm test`: 169 passed (was 159, +10 new). No regressions.
+
+### Hand-off to umbrella (Vihrea-MCP-päätiedosto)
+
+Operator workflow there: bump the `submodules/elections` pin to this commit, push, CI builds new MCP image, operator pulls. After that the new params are live in production claude.ai.
