@@ -23,6 +23,25 @@ import {
   getDatabasePath,
   PRESIDENTIAL_TABLES,
 } from './election-tables.js';
+import {
+  findVariable,
+  findVariableCode,
+  requireVariable,
+  findYearVariable,
+  findYearColumn,
+  findMeasureVariable,
+  findMeasureCodesByText,
+  requireContentCode,
+  resolveContentCode,
+  resolvePartySchema,
+  AREA_HINTS,
+  CANDIDATE_HINTS,
+  GENDER_HINTS,
+  OUTCOME_HINTS,
+  ROUND_HINTS,
+  BACKGROUND_GROUP_HINTS,
+  BACKGROUND_DIMENSION_HINTS,
+} from '../api/variable-resolver.js';
 import type { ElectionRecord, ElectionType, VoterBackgroundRow, VoterTurnoutDemographicRow } from './types.js';
 import type { PxWebResponse, PxWebTableMetadata } from '../api/types.js';
 
@@ -35,7 +54,10 @@ import type { PxWebResponse, PxWebTableMetadata } from '../api/types.js';
  */
 export function filterResponseByYear(response: PxWebResponse, year: number): PxWebResponse {
   const keyColumns = response.columns.filter((c) => c.type === 'd' || c.type === 't');
-  const vuosiKeyIdx = keyColumns.findIndex((c) => c.code === 'Vuosi');
+  const yearColumn = findYearColumn(response.columns);
+  const vuosiKeyIdx = yearColumn
+    ? keyColumns.findIndex((c) => c.code === yearColumn.code)
+    : -1;
   if (vuosiKeyIdx < 0) return response;
   return {
     ...response,
@@ -54,6 +76,15 @@ const HISTORICAL_TTL_MS =
   process.env.CACHE_TTL_HISTORICAL_MS
     ? parseInt(process.env.CACHE_TTL_HISTORICAL_MS, 10)
     : 7 * 24 * 60 * 60 * 1000; // 7 days
+
+/**
+ * Maximum cells PxWeb will return for one query before answering 403.
+ *
+ * Empirical, not documented: measured 2026-08-28, a 99 034-cell request to 13t6
+ * succeeded and a 297 102-cell one was refused. Statistics Finland's own guidance
+ * cites 100 000. Lower this if 403s reappear.
+ */
+const PXWEB_CELL_LIMIT = 100_000;
 
 function electionTtl(year: number): number | undefined {
   return year < new Date().getFullYear() ? HISTORICAL_TTL_MS : undefined; // undefined = default (1h)
@@ -105,10 +136,11 @@ export async function loadPartyResults(
   // (~305 areas × 20 parties × 2 measures ≈ 12 000+ cells). Year-specific tables
   // (13t2, 14vm, 14h2) contain all area levels within the cell budget.
   if (!areaId && exact?.party_by_aanestysalue && exact.party_by_aanestysalue_schema) {
-    const schema    = exact.party_by_aanestysalue_schema;
     const dbPath    = getDatabasePath(exact);
     const tableId   = exact.party_by_aanestysalue;
     const metadata  = await fetchMetadataCached(dbPath, tableId);
+    // Declared names → the codes this table actually uses. See variable-resolver.ts.
+    const schema    = resolvePartySchema(metadata, exact.party_by_aanestysalue_schema, tableId);
 
     type FilterItem = { code: string; selection: { filter: 'item' | 'all'; values: string[] } };
     const filters: FilterItem[] = [];
@@ -120,9 +152,10 @@ export async function loadPartyResults(
     filters.push({ code: schema.area_var,  selection: { filter: 'all', values: ['*'] } });
     filters.push({ code: schema.measure_var, selection: { filter: 'item', values: [schema.votes_code, schema.share_code] } });
 
-    // Year filter if table has Vuosi variable
-    if (metadata.variables.some((v) => v.code === 'Vuosi')) {
-      filters.push({ code: 'Vuosi', selection: { filter: 'item', values: [String(year)] } });
+    // Year filter if the table has a time variable
+    const yearVar = findYearVariable(metadata);
+    if (yearVar) {
+      filters.push({ code: yearVar.code, selection: { filter: 'item', values: [String(year)] } });
     }
 
     const query    = { query: filters, response: { format: 'json' as const } };
@@ -145,16 +178,16 @@ export async function loadPartyResults(
     throw new Error(`No party table for ${electionType} ${year}`);
   }
 
-  const schema = tables.party_schema;
   const dbPath = getDatabasePath(tables);
   const tableId = tables.party_by_kunta;
   const metadata = await fetchMetadataCached(dbPath, tableId);
+  const schema = resolvePartySchema(metadata, tables.party_schema, tableId);
 
-  // Detect multi-year table: Vuosi variable present with more than one value.
+  // Detect multi-year table: time variable present with more than one value.
   // Multi-year tables (13sw, 14z7, 14y4, 14gv) cover multiple elections in one PxWeb
   // table. We cache the full response (all years) so compare_elections can serve
   // additional years as cache hits — zero extra API calls.
-  const vuosiVar = metadata.variables.find((v) => v.code === 'Vuosi');
+  const vuosiVar = findYearVariable(metadata);
   const isMultiYear = (vuosiVar?.values.length ?? 0) > 1;
 
   type FilterItem = { code: string; selection: { filter: 'item' | 'all'; values: string[] } };
@@ -163,7 +196,7 @@ export async function loadPartyResults(
   // Year filter — only for single-year tables; multi-year tables fetch all years
   // and filter post-cache (see filterResponseByYear below).
   if (vuosiVar && !isMultiYear) {
-    filters.push({ code: 'Vuosi', selection: { filter: 'item', values: [String(year)] } });
+    filters.push({ code: vuosiVar.code, selection: { filter: 'item', values: [String(year)] } });
   }
 
   // Gender filter — select total only when variable is present
@@ -262,73 +295,177 @@ export async function loadCandidateResults(
   const dbPath  = getDatabasePath(tables);
   const metadata = await fetchMetadataCached(dbPath, tableId);
 
-  // Detect area variable
-  const AREA_VAR_CANDIDATES = ['Alue/Äänestysalue', 'Äänestysalue', 'Alue'];
-  const areaVarCode = metadata.variables.find(
-    (v) => AREA_VAR_CANDIDATES.includes(v.code)
-  )?.code ?? null;
+  // Area variable — absent in national-only tables, hence findVariable not require
+  const areaVar     = findVariable(metadata, AREA_HINTS);
+  const areaVarCode = areaVar?.code ?? null;
 
   // Find the geographic-unit aggregate code (VP## or HV##)
-  const unit_code = areaVarCode
-    ? (metadata.variables
-        .find((v) => v.code === areaVarCode)
-        ?.values.find((v) => v.startsWith('VP') || v.startsWith('HV')) ?? '')
-    : '';
+  const unit_code = areaVar?.values.find((v) => v.startsWith('VP') || v.startsWith('HV')) ?? '';
 
-  // Detect measure variable and its vote/share codes
-  const tiedotVar = metadata.variables.find(
-    (v) => v.code === 'Tiedot' || v.code === 'Äänestystiedot' || v.code === 'Puolueiden kannatus'
-  );
-  const tiedotVarCode = tiedotVar?.code ?? 'Tiedot';
-  const votesCode = tiedotVar?.values.find(
-    (_, i) =>
-      (tiedotVar.valueTexts[i] ?? '').toLowerCase().includes('äänimäärä') ||
-      (tiedotVar.valueTexts[i] ?? '').toLowerCase().includes('äänet')
-  ) ?? 'evaa_aanet';
-  const shareCode = tiedotVar?.values.find(
-    (_, i) => (tiedotVar.valueTexts[i] ?? '').toLowerCase().includes('osuus')
-  ) ?? 'evaa_osuus_aanista';
+  // Measure variable and its vote/share codes. Candidate tables carry no schema,
+  // so the codes come from the Finnish value texts, which the July 2026 migration
+  // did not touch.
+  const tiedotVar     = findMeasureVariable(metadata);
+  const tiedotVarCode = tiedotVar?.code;
+  const { votes: votesCode, share: shareCode } = findMeasureCodesByText(tiedotVar);
+  if (!tiedotVarCode || !votesCode) {
+    throw new Error(
+      `PxWeb table ${tableId}: no votes measure found in ` +
+      `'${tiedotVarCode ?? '(no measure variable)'}'. ` +
+      `Available: ${(tiedotVar?.values ?? []).join(', ')}.`
+    );
+  }
+
+  const candidateVar = requireVariable(metadata, CANDIDATE_HINTS, 'candidate', tableId);
+  const yearVar      = findYearVariable(metadata);
+  const outcomeVar   = findVariable(metadata, OUTCOME_HINTS);
+  const roundVar     = findVariable(metadata, ROUND_HINTS);
 
   type FilterItem = { code: string; selection: { filter: 'item' | 'all'; values: string[] } };
   const filters: FilterItem[] = [];
 
-  if (metadata.variables.some((v) => v.code === 'Vuosi')) {
-    filters.push({ code: 'Vuosi', selection: { filter: 'item', values: [String(year)] } });
+  if (yearVar) {
+    filters.push({ code: yearVar.code, selection: { filter: 'item', values: [String(year)] } });
   }
   if (areaVarCode) {
     filters.push({ code: areaVarCode, selection: { filter: 'all', values: ['*'] } });
   }
   filters.push({
-    code: 'Ehdokas',
+    code: candidateVar.code,
     selection: candidateId
       ? { filter: 'item', values: [candidateId] }
       : { filter: 'all', values: ['*'] },
   });
-  if (metadata.variables.some((v) => v.code === 'Valintatieto')) {
-    // Fetch individual outcome codes (1=elected, 2=varalla, 3=not_elected) instead of SSS aggregate.
-    // Each candidate belongs to exactly one outcome category, so vote counts are equivalent to SSS.
-    filters.push({ code: 'Valintatieto', selection: { filter: 'item', values: ['1', '2', '3'] } });
+  // Outcome dimension. Requesting the three individual codes (1=elected,
+  // 2=varalla, 3=not_elected) alongside every area triples the cell count —
+  // for 13t6 that is 169 areas x 293 candidates x 3 outcomes x 2 measures =
+  // 297 102, and PxWeb answers 403 above roughly 100 000. The aggregate brings
+  // it to 99 034, which is evidently what the cell budget was designed around.
+  //
+  // Vote figures are identical either way, because each candidate belongs to
+  // exactly one outcome category. The outcome itself is then fetched below in a
+  // second, tiny query that omits the area breakdown.
+  const outcomeAggregate = outcomeVar?.values.includes('SSS') ? 'SSS' : undefined;
+  if (outcomeVar) {
+    filters.push({
+      code: outcomeVar.code,
+      selection: outcomeAggregate
+        ? { filter: 'item', values: [outcomeAggregate] }
+        : { filter: 'all', values: ['*'] },
+    });
   }
   // Round variable (presidential) — fetch all rounds, filter in normalizer
-  if (metadata.variables.some((v) => v.code === 'Kierros')) {
-    filters.push({ code: 'Kierros', selection: { filter: 'all', values: ['*'] } });
+  if (roundVar) {
+    filters.push({ code: roundVar.code, selection: { filter: 'all', values: ['*'] } });
   }
   filters.push({
     code: tiedotVarCode,
-    selection: { filter: 'item', values: [votesCode, shareCode] },
+    selection: { filter: 'item', values: shareCode ? [votesCode, shareCode] : [votesCode] },
   });
 
-  const query = { query: filters, response: { format: 'json' as const } };
   const cacheKey = `data:${tableId}:${electionType}:${year}:${candidateId ?? 'all'}:${unitKey ?? 'national'}`;
 
-  const { value: response, cache_hit } = await withCache(cacheKey, () =>
-    pxwebClient.queryTable(dbPath, tableId, query),
-    electionTtl(year)
+  // PxWeb refuses a query above roughly 100 000 cells with a 403. Some candidate
+  // tables exceed that on their own: municipal Helsinki (14v9) is 167 äänestysalue
+  // x 983 candidates x 2 measures = 328 322 cells, so no single request can ever
+  // fetch it. Split along the candidate dimension — the only one a caller does not
+  // need whole in one response — and stitch the pages back together.
+  const cellsPerCandidate = Math.max(
+    1,
+    (areaVar?.values.length ?? 1)
+      * (shareCode ? 2 : 1)
+      * (roundVar?.values.length ?? 1)
   );
+  const candidatesPerRequest = Math.max(1, Math.floor(PXWEB_CELL_LIMIT / cellsPerCandidate));
+  const allCandidateCodes = candidateId ? [candidateId] : candidateVar.values;
+  const needsPaging = allCandidateCodes.length > candidatesPerRequest;
+
+  const { value: response, cache_hit } = await withCache(cacheKey, async () => {
+    if (!needsPaging) {
+      return pxwebClient.queryTable(dbPath, tableId, {
+        query: filters, response: { format: 'json' as const },
+      });
+    }
+
+    const pages = Math.ceil(allCandidateCodes.length / candidatesPerRequest);
+    console.error(
+      `PxWeb table ${tableId}: ${allCandidateCodes.length} candidates x ${cellsPerCandidate} cells ` +
+      `exceeds the ${PXWEB_CELL_LIMIT}-cell limit — splitting into ${pages} requests.`
+    );
+
+    let merged: PxWebResponse | undefined;
+    for (let i = 0; i < allCandidateCodes.length; i += candidatesPerRequest) {
+      const batch = allCandidateCodes.slice(i, i + candidatesPerRequest);
+      const batched = filters.map((f) =>
+        f.code === candidateVar.code
+          ? { code: f.code, selection: { filter: 'item' as const, values: batch } }
+          : f
+      );
+      const part = await pxwebClient.queryTable(dbPath, tableId, {
+        query: batched, response: { format: 'json' as const },
+      });
+      merged = merged
+        ? { ...merged, data: [...merged.data, ...part.data] }
+        : part;
+    }
+    return merged!;
+  }, electionTtl(year));
 
   const rows = normalizeCandidateByAanestysalue(
     response, metadata, year, electionType, roundFilter
   );
+
+  // Second pass for the per-candidate outcome, which the aggregate above cannot
+  // carry. Restricted to the geographic-unit aggregate row, so it costs roughly
+  // candidates x outcomes cells (~900 for a vaalipiiri) rather than a full
+  // area breakdown.
+  if (outcomeVar && outcomeAggregate && areaVarCode && unit_code) {
+    const outcomeQuery = {
+      query: [
+        ...(yearVar
+          ? [{ code: yearVar.code, selection: { filter: 'item' as const, values: [String(year)] } }]
+          : []),
+        { code: areaVarCode, selection: { filter: 'item' as const, values: [unit_code] } },
+        {
+          code: candidateVar.code,
+          selection: candidateId
+            ? { filter: 'item' as const, values: [candidateId] }
+            : { filter: 'all' as const, values: ['*'] },
+        },
+        { code: outcomeVar.code, selection: { filter: 'item' as const, values: ['1', '2', '3'] } },
+        { code: tiedotVarCode, selection: { filter: 'item' as const, values: [votesCode] } },
+      ],
+      response: { format: 'json' as const },
+    };
+
+    try {
+      const { value: outcomeResponse } = await withCache(
+        `outcome:${tableId}:${year}:${candidateId ?? 'all'}:${unit_code}`,
+        () => pxwebClient.queryTable(dbPath, tableId, outcomeQuery),
+        electionTtl(year)
+      );
+      const outcomeRows = normalizeCandidateByAanestysalue(
+        outcomeResponse, metadata, year, electionType, roundFilter
+      );
+      const outcomeByCandidate = new Map<string, string>();
+      for (const r of outcomeRows) {
+        // A candidate appears under exactly one outcome with a non-zero total.
+        if (r.candidate_id && r.election_outcome && r.votes > 0) {
+          outcomeByCandidate.set(r.candidate_id, r.election_outcome);
+        }
+      }
+      for (const r of rows) {
+        const outcome = r.candidate_id ? outcomeByCandidate.get(r.candidate_id) : undefined;
+        if (outcome) r.election_outcome = outcome;
+        else delete r.election_outcome;   // never leave the 'SSS' aggregate code in place
+      }
+    } catch (err) {
+      // Vote data is the primary product; losing the outcome annotation should
+      // not fail the whole call.
+      console.error(`PxWeb outcome lookup failed for ${tableId}: ${(err as Error).message}`);
+      for (const r of rows) delete r.election_outcome;
+    }
+  }
 
   return { rows, tableId, cache_hit, unit_code };
 }
@@ -364,27 +501,34 @@ export async function loadPresidentialByVaalipiiri(
   const filters: FilterItem[] = [];
 
   // Fetch all years — cache the full multi-year response; filter per-request below
-  filters.push({ code: 'Vaalipiiri', selection: { filter: 'all', values: ['*'] } });
+  const areaVar      = requireVariable(metadata, AREA_HINTS, 'area', tableId);
+  const candidateVar = requireVariable(metadata, CANDIDATE_HINTS, 'candidate', tableId);
+  const roundVar     = findVariable(metadata, ROUND_HINTS);
+
+  filters.push({ code: areaVar.code, selection: { filter: 'all', values: ['*'] } });
   filters.push({
-    code: 'Ehdokas',
+    code: candidateVar.code,
     selection: candidateId
       ? { filter: 'item', values: [candidateId] }
       : { filter: 'all', values: ['*'] },
   });
-  // Include Kierros if present (presidential rounds)
-  if (metadata.variables.some((v) => v.code === 'Kierros')) {
-    filters.push({ code: 'Kierros', selection: { filter: 'all', values: ['*'] } });
+  // Include the round variable if present (presidential rounds)
+  if (roundVar) {
+    filters.push({ code: roundVar.code, selection: { filter: 'all', values: ['*'] } });
   }
 
-  const tiedotVar = metadata.variables.find((v) => v.code === 'Tiedot');
-  const votesCode = tiedotVar?.values.find(
-    (_, i) => (tiedotVar.valueTexts[i] ?? '').toLowerCase().includes('äänimäärä') ||
-              (tiedotVar.valueTexts[i] ?? '').toLowerCase().includes('äänet')
-  ) ?? 'pvaa_aanet';
-  const shareCode = tiedotVar?.values.find(
-    (_, i) => (tiedotVar.valueTexts[i] ?? '').toLowerCase().includes('osuus')
-  ) ?? 'pvaa_osuus_aanista';
-  filters.push({ code: 'Tiedot', selection: { filter: 'item', values: [votesCode, shareCode] } });
+  const tiedotVar = findMeasureVariable(metadata);
+  const { votes: votesCode, share: shareCode } = findMeasureCodesByText(tiedotVar);
+  if (!tiedotVar || !votesCode) {
+    throw new Error(
+      `PxWeb table ${tableId}: no votes measure found. ` +
+      `Available: ${(tiedotVar?.values ?? []).join(', ')}.`
+    );
+  }
+  filters.push({
+    code: tiedotVar.code,
+    selection: { filter: 'item', values: shareCode ? [votesCode, shareCode] : [votesCode] },
+  });
 
   const query = { query: filters, response: { format: 'json' as const } };
   // Cache key without year — the full multi-year table is cached in one call
@@ -430,29 +574,36 @@ export async function loadEUCandidateByVaalipiiri(
   type FilterItem = { code: string; selection: { filter: 'item' | 'all'; values: string[] } };
   const filters: FilterItem[] = [];
 
-  if (metadata.variables.some((v) => v.code === 'Vuosi')) {
-    filters.push({ code: 'Vuosi', selection: { filter: 'item', values: [String(year)] } });
+  const yearVar      = findYearVariable(metadata);
+  const candidateVar = requireVariable(metadata, CANDIDATE_HINTS, 'candidate', tableId);
+  const areaVar      = requireVariable(metadata, AREA_HINTS, 'area', tableId);
+
+  if (yearVar) {
+    filters.push({ code: yearVar.code, selection: { filter: 'item', values: [String(year)] } });
   }
 
   filters.push({
-    code: 'Puolue ja ehdokas',
+    code: candidateVar.code,
     selection: candidateId
       ? { filter: 'item', values: [candidateId] }
       : { filter: 'all', values: ['*'] },
   });
 
-  filters.push({ code: 'Vaalipiiri', selection: { filter: 'all', values: ['*'] } });
+  filters.push({ code: areaVar.code, selection: { filter: 'all', values: ['*'] } });
 
-  // Detect Tiedot variable and vote/share codes
-  const tiedotVar = metadata.variables.find((v) => v.code === 'Tiedot');
-  const votesCode = tiedotVar?.values.find(
-    (_, i) => (tiedotVar.valueTexts[i] ?? '').toLowerCase().includes('äänimäärä') ||
-              (tiedotVar.valueTexts[i] ?? '').toLowerCase().includes('äänet')
-  ) ?? 'euvaa_aanet';
-  const shareCode = tiedotVar?.values.find(
-    (_, i) => (tiedotVar.valueTexts[i] ?? '').toLowerCase().includes('osuus')
-  ) ?? 'euvaa_osuus_aanista';
-  filters.push({ code: 'Tiedot', selection: { filter: 'item', values: [votesCode, shareCode] } });
+  // Measure variable and vote/share codes, from the value texts
+  const tiedotVar = findMeasureVariable(metadata);
+  const { votes: votesCode, share: shareCode } = findMeasureCodesByText(tiedotVar);
+  if (!tiedotVar || !votesCode) {
+    throw new Error(
+      `PxWeb table ${tableId}: no votes measure found. ` +
+      `Available: ${(tiedotVar?.values ?? []).join(', ')}.`
+    );
+  }
+  filters.push({
+    code: tiedotVar.code,
+    selection: { filter: 'item', values: shareCode ? [votesCode, shareCode] : [votesCode] },
+  });
 
   const query    = { query: filters, response: { format: 'json' as const } };
   const cacheKey = `data:${tableId}:eu_parliament:${year}:${candidateId ?? 'all'}:vaalipiiri`;
@@ -485,33 +636,33 @@ export async function loadEUCandidateByAanestysalue(
   const dbPath  = getDatabasePath(tables);
   const metadata = await fetchMetadataCached(dbPath, tableId);
 
-  // Detect area variable (may be 'Äänestysalue' or 'Alue/Äänestysalue')
-  const areaVarCandidates = ['Alue/Äänestysalue', 'Äänestysalue', 'Alue'];
-  const areaVarCode = metadata.variables.find((v) => areaVarCandidates.includes(v.code))?.code;
+  const areaVarCode  = findVariableCode(metadata, AREA_HINTS);
+  const yearVar      = findYearVariable(metadata);
+  const candidateVar = requireVariable(metadata, CANDIDATE_HINTS, 'candidate', tableId);
 
   type FilterItem = { code: string; selection: { filter: 'item' | 'all'; values: string[] } };
   const filters: FilterItem[] = [];
 
-  if (metadata.variables.some((v) => v.code === 'Vuosi')) {
-    filters.push({ code: 'Vuosi', selection: { filter: 'item', values: [String(year)] } });
+  if (yearVar) {
+    filters.push({ code: yearVar.code, selection: { filter: 'item', values: [String(year)] } });
   }
   if (areaVarCode) {
     filters.push({ code: areaVarCode, selection: { filter: 'all', values: ['*'] } });
   }
-  filters.push({ code: 'Ehdokas', selection: { filter: 'item', values: [candidateId] } });
+  filters.push({ code: candidateVar.code, selection: { filter: 'item', values: [candidateId] } });
 
-  const tiedotVar = metadata.variables.find(
-    (v) => v.code === 'Tiedot' || v.code === 'Äänestystiedot'
-  );
-  const tiedotVarCode = tiedotVar?.code ?? 'Tiedot';
-  const votesCode = tiedotVar?.values.find(
-    (_, i) => (tiedotVar.valueTexts[i] ?? '').toLowerCase().includes('äänimäärä') ||
-              (tiedotVar.valueTexts[i] ?? '').toLowerCase().includes('äänet')
-  ) ?? 'euvaa_aanet';
-  const shareCode = tiedotVar?.values.find(
-    (_, i) => (tiedotVar.valueTexts[i] ?? '').toLowerCase().includes('osuus')
-  ) ?? 'euvaa_osuus_aanista';
-  filters.push({ code: tiedotVarCode, selection: { filter: 'item', values: [votesCode, shareCode] } });
+  const tiedotVar = findMeasureVariable(metadata);
+  const { votes: votesCode, share: shareCode } = findMeasureCodesByText(tiedotVar);
+  if (!tiedotVar || !votesCode) {
+    throw new Error(
+      `PxWeb table ${tableId}: no votes measure found. ` +
+      `Available: ${(tiedotVar?.values ?? []).join(', ')}.`
+    );
+  }
+  filters.push({
+    code: tiedotVar.code,
+    selection: { filter: 'item', values: shareCode ? [votesCode, shareCode] : [votesCode] },
+  });
 
   const query    = { query: filters, response: { format: 'json' as const } };
   const cacheKey = `data:${tableId}:eu_parliament:${year}:${candidateId}:all`;
@@ -580,16 +731,34 @@ export async function loadVoterBackground(
   if (!dimCodes) throw new Error(`Unknown background dimension: ${dimension}`);
 
   const groupCode  = groupPxWebCode(electionType, group);
-  const genderVar  = genderVarName(electionType);
-  const groupVar   = 'Äänioikeutetut, ehdokkaat ja valitut';
+
+  const yearVar    = findYearVariable(metadata);
+  if (!yearVar) throw new Error(`PxWeb table ${tableId}: no time variable found.`);
+  const genderVar  = requireVariable(
+    metadata, [genderVarName(electionType), ...GENDER_HINTS], 'gender', tableId
+  );
+  const groupVar   = requireVariable(metadata, BACKGROUND_GROUP_HINTS, 'background_group', tableId);
+  const dimVar     = requireVariable(
+    metadata, BACKGROUND_DIMENSION_HINTS, 'background_dimension', tableId
+  );
+  const measureVar = findMeasureVariable(metadata);
 
   type FilterItem = { code: string; selection: { filter: 'item' | 'all'; values: string[] } };
   const filters: FilterItem[] = [
-    { code: 'Vuosi',       selection: { filter: 'item', values: [String(year)] } },
-    { code: genderVar,     selection: { filter: 'all',  values: ['*'] } },
-    { code: groupVar,      selection: { filter: 'item', values: [groupCode] } },
-    { code: 'Taustamuuttujat', selection: { filter: 'item', values: dimCodes } },
-    { code: 'Tiedot',     selection: { filter: 'item', values: ['lkm1', 'pros'] } },
+    { code: yearVar.code,   selection: { filter: 'item', values: [String(year)] } },
+    { code: genderVar.code, selection: { filter: 'all',  values: ['*'] } },
+    { code: groupVar.code,  selection: { filter: 'item', values: [groupCode] } },
+    { code: dimVar.code,    selection: { filter: 'item', values: dimCodes } },
+    {
+      code: measureVar?.code ?? 'contentscode',
+      selection: {
+        filter: 'item',
+        values: [
+          requireContentCode(measureVar, 'lkm1', tableId),
+          requireContentCode(measureVar, 'pros', tableId),
+        ],
+      },
+    },
   ];
 
   const query = { query: filters, response: { format: 'json' as const } };
@@ -639,31 +808,47 @@ export async function loadVoterTurnoutByDemographics(
   const dbPath  = getDatabasePath(tables!);
   const metadata = await fetchMetadataCached(dbPath, tableId);
 
+  const genderVar  = requireVariable(metadata, GENDER_HINTS, 'gender', tableId);
+  const areaVar    = requireVariable(metadata, AREA_HINTS, 'area', tableId);
+  const yearVar    = findYearVariable(metadata);
+  const roundVar   = findVariable(metadata, ROUND_HINTS);
+  const measureVar = findMeasureVariable(metadata);
+
   type FilterItem = { code: string; selection: { filter: 'item' | 'all'; values: string[] } };
   const filters: FilterItem[] = [
-    { code: 'Sukupuoli', selection: { filter: 'all', values: ['*'] } },
-    { code: 'Alue',      selection: { filter: 'item', values: ['SSS'] } },
+    { code: genderVar.code, selection: { filter: 'all', values: ['*'] } },
+    { code: areaVar.code,   selection: { filter: 'item', values: ['SSS'] } },
   ];
 
-  // Dimension variable: fetch all values, normalizer handles stripping
-  const dimVarCode = metadata.variables.find(
-    (v) => v.code !== 'Sukupuoli' && v.code !== 'Alue' && v.code !== 'Kierros' &&
-           v.code !== 'Vuosi' && v.code !== 'Tiedot'
-  )?.code;
+  // Dimension variable: whatever is left once the known roles are accounted for.
+  // Identified by exclusion because the dimension differs per table (Koulutusaste,
+  // Tulokvintiili, Ikäluokka, …) and is the thing the caller actually asked for.
+  const knownCodes = new Set(
+    [genderVar.code, areaVar.code, yearVar?.code, roundVar?.code, measureVar?.code]
+      .filter((c): c is string => c !== undefined)
+  );
+  const dimVarCode = metadata.variables.find((v) => !knownCodes.has(v.code))?.code;
   if (dimVarCode) {
     filters.push({ code: dimVarCode, selection: { filter: 'all', values: ['*'] } });
   }
 
   // Presidential: filter to the requested round
-  if (metadata.variables.some((v) => v.code === 'Kierros')) {
-    filters.push({ code: 'Kierros', selection: { filter: 'item', values: [String(round)] } });
+  if (roundVar) {
+    filters.push({ code: roundVar.code, selection: { filter: 'item', values: [String(round)] } });
   }
 
-  // Tiedot: fetch eligible voters (area), votes cast (area), and turnout %
+  // Measures: eligible voters (area), votes cast (area), and turnout %
   const suffix = ({ parliamentary: 'evaa', municipal: 'kvaa', eu_parliament: 'euvaa', presidential: 'pvaa' } as Record<string, string>)[electionType]!;
   filters.push({
-    code: 'Tiedot',
-    selection: { filter: 'item', values: [`aoiky_al_${suffix}`, `a_al_${suffix}`, `pros_al_${suffix}`] },
+    code: measureVar?.code ?? 'contentscode',
+    selection: {
+      filter: 'item',
+      values: [
+        requireContentCode(measureVar, `aoiky_al_${suffix}`, tableId),
+        requireContentCode(measureVar, `a_al_${suffix}`, tableId),
+        requireContentCode(measureVar, `pros_al_${suffix}`, tableId),
+      ],
+    },
   });
 
   const query = { query: filters, response: { format: 'json' as const } };

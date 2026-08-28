@@ -306,36 +306,36 @@ export const PARLIAMENTARY_TABLES: ElectionTableSet[] = [
     election_type: 'parliamentary',
     year: 2023,
     database: DATABASE.active,
-    party_by_kunta:   'statfin_evaa_pxt_13sw',     // 1983–2023
+    party_by_kunta:   '13sw',     // 1983–2023
     party_schema:     PARLIAMENTARY_PARTY_SCHEMA,
     // Year-specific all-areas table: use when areaId is omitted to avoid 403 on 13sw
-    party_by_aanestysalue:        'statfin_evaa_pxt_13t2',
+    party_by_aanestysalue:        '13t2',
     party_by_aanestysalue_schema: PARLIAMENTARY_YEAR_PARTY_SCHEMA,
-    turnout_by_aanestysalue: 'statfin_evaa_pxt_13sx',
+    turnout_by_aanestysalue: '13sx',
     geographic_unit_type: 'vaalipiiri',
     candidate_by_aanestysalue: {
-      'helsinki':       'statfin_evaa_pxt_13t6',
-      'uusimaa':        'statfin_evaa_pxt_13t7',
-      'lounais-suomi':  'statfin_evaa_pxt_13t8',
-      'satakunta':      'statfin_evaa_pxt_13t9',
-      'hame':           'statfin_evaa_pxt_13ta',
-      'pirkanmaa':      'statfin_evaa_pxt_13tb',
-      'kaakkois-suomi': 'statfin_evaa_pxt_13tc',
-      'savo-karjala':   'statfin_evaa_pxt_13td',
-      'vaasa':          'statfin_evaa_pxt_13te',
-      'keski-suomi':    'statfin_evaa_pxt_13tf',
-      'oulu':           'statfin_evaa_pxt_13tg',
-      'lappi':          'statfin_evaa_pxt_13th',
-      'ahvenanmaa':     'statfin_evaa_pxt_13ti',
+      'helsinki':       '13t6',
+      'uusimaa':        '13t7',
+      'lounais-suomi':  '13t8',
+      'satakunta':      '13t9',
+      'hame':           '13ta',
+      'pirkanmaa':      '13tb',
+      'kaakkois-suomi': '13tc',
+      'savo-karjala':   '13td',
+      'vaasa':          '13te',
+      'keski-suomi':    '13tf',
+      'oulu':           '13tg',
+      'lappi':          '13th',
+      'ahvenanmaa':     '13ti',
     },
-    results_analysis: 'statfin_evaa_pxt_13yh',
-    voter_background: 'statfin_evaa_pxt_13su',          // 2011–2023, multi-year
+    results_analysis: '13yh',
+    voter_background: '13su',          // 2011–2023, multi-year
     voter_turnout_by_demographics: {
-      age_group:       'statfin_evaa_pxt_13ys',          // 18/19 + 5-yr bins → aggregate to 7 groups
-      education:       'statfin_evaa_pxt_13yt',
-      origin_language: 'statfin_evaa_pxt_13yu',
-      income_quintile: 'statfin_evaa_pxt_13yv',
-      activity:        'statfin_evaa_pxt_13yw',
+      age_group:       '13ys',          // 18/19 + 5-yr bins → aggregate to 7 groups
+      education:       '13yt',
+      origin_language: '13yu',
+      income_quintile: '13yv',
+      activity:        '13yw',
     },
   },
   {
@@ -461,36 +461,36 @@ export const MUNICIPAL_TABLES: ElectionTableSet[] = [
     election_type: 'municipal',
     year: 2025,
     database: DATABASE.active,
-    party_by_kunta: 'statfin_kvaa_pxt_14z7',       // 1976–2025, covers all municipal years
+    party_by_kunta: '14z7',       // 1976–2025, covers all municipal years
     party_schema:   MUNICIPAL_PARTY_SCHEMA,
     // Year-specific all-areas table: use when areaId is omitted to avoid 403 on 14z7
-    party_by_aanestysalue:        'statfin_kvaa_pxt_14vm',
+    party_by_aanestysalue:        '14vm',
     party_by_aanestysalue_schema: MUNICIPAL_YEAR_PARTY_SCHEMA,
-    turnout_by_aanestysalue: 'statfin_kvaa_pxt_14vl',
+    turnout_by_aanestysalue: '14vl',
     geographic_unit_type: 'vaalipiiri',
     candidate_by_aanestysalue: {
       // 12 vaalipiirit (no Ahvenanmaa for municipal elections)
-      'helsinki':       'statfin_kvaa_pxt_14v9',
-      'uusimaa':        'statfin_kvaa_pxt_14va',
-      'lounais-suomi':  'statfin_kvaa_pxt_14vb',
-      'satakunta':      'statfin_kvaa_pxt_14vc',
-      'hame':           'statfin_kvaa_pxt_14vd',
-      'pirkanmaa':      'statfin_kvaa_pxt_14ve',
-      'kaakkois-suomi': 'statfin_kvaa_pxt_14vf',
-      'savo-karjala':   'statfin_kvaa_pxt_14vg',
-      'vaasa':          'statfin_kvaa_pxt_14vh',
-      'keski-suomi':    'statfin_kvaa_pxt_14vi',
-      'oulu':           'statfin_kvaa_pxt_14vj',
-      'lappi':          'statfin_kvaa_pxt_14vk',
+      'helsinki':       '14v9',
+      'uusimaa':        '14va',
+      'lounais-suomi':  '14vb',
+      'satakunta':      '14vc',
+      'hame':           '14vd',
+      'pirkanmaa':      '14ve',
+      'kaakkois-suomi': '14vf',
+      'savo-karjala':   '14vg',
+      'vaasa':          '14vh',
+      'keski-suomi':    '14vi',
+      'oulu':           '14vj',
+      'lappi':          '14vk',
     },
-    results_analysis: 'statfin_kvaa_pxt_14yb',
-    voter_background: 'statfin_kvaa_pxt_14w4',          // 2012–2025, multi-year
+    results_analysis: '14yb',
+    voter_background: '14w4',          // 2012–2025, multi-year
     voter_turnout_by_demographics: {
-      age_group:       'statfin_kvaa_pxt_152q',          // Alue=SSS → Manner-Suomi
-      education:       'statfin_kvaa_pxt_152r',
-      origin_language: 'statfin_kvaa_pxt_152s',
-      income_quintile: 'statfin_kvaa_pxt_152t',
-      activity:        'statfin_kvaa_pxt_152u',
+      age_group:       '152q',          // Alue=SSS → Manner-Suomi
+      education:       '152r',
+      origin_language: '152s',
+      income_quintile: '152t',
+      activity:        '152u',
     },
   },
   {
@@ -527,43 +527,43 @@ export const REGIONAL_TABLES: ElectionTableSet[] = [
     election_type: 'regional',
     year: 2025,
     database: DATABASE.active,
-    party_by_kunta: 'statfin_alvaa_pxt_14y4',       // 2022–2025, covers both regional years
+    party_by_kunta: '14y4',       // 2022–2025, covers both regional years
     party_schema:   REGIONAL_PARTY_SCHEMA,
     // A4: Year-specific all-areas table — enables hyvinvointialue/kunta queries without 403
-    party_by_aanestysalue:        'statfin_alvaa_pxt_14y2',
+    party_by_aanestysalue:        '14y2',
     party_by_aanestysalue_schema: REGIONAL_YEAR_PARTY_SCHEMA,
     geographic_unit_type: 'hyvinvointialue',
     candidate_by_aanestysalue: {
       // 21 hyvinvointialue, one table each
-      'ita-uusimaa':        'statfin_alvaa_pxt_14zu',
-      'keski-uusimaa':      'statfin_alvaa_pxt_14zv',
-      'lansi-uusimaa':      'statfin_alvaa_pxt_14zw',
-      'vantaa-kerava':      'statfin_alvaa_pxt_14zx',
-      'varsinais-suomi':    'statfin_alvaa_pxt_14zy',
-      'satakunta':          'statfin_alvaa_pxt_14zz',
-      'kanta-hame':         'statfin_alvaa_pxt_151a',
-      'pirkanmaa':          'statfin_alvaa_pxt_151b',
-      'paijat-hame':        'statfin_alvaa_pxt_151c',
-      'kymenlaakso':        'statfin_alvaa_pxt_151d',
-      'etela-karjala':      'statfin_alvaa_pxt_151e',
-      'etela-savo':         'statfin_alvaa_pxt_151f',
-      'pohjois-savo':       'statfin_alvaa_pxt_151g',
-      'pohjois-karjala':    'statfin_alvaa_pxt_151h',
-      'keski-suomi':        'statfin_alvaa_pxt_151i',
-      'etela-pohjanmaa':    'statfin_alvaa_pxt_151j',
-      'pohjanmaa':          'statfin_alvaa_pxt_151k',
-      'keski-pohjanmaa':    'statfin_alvaa_pxt_151l',
-      'pohjois-pohjanmaa':  'statfin_alvaa_pxt_151m',
-      'kainuu':             'statfin_alvaa_pxt_151n',
-      'lappi':              'statfin_alvaa_pxt_151p',
+      'ita-uusimaa':        '14zu',
+      'keski-uusimaa':      '14zv',
+      'lansi-uusimaa':      '14zw',
+      'vantaa-kerava':      '14zx',
+      'varsinais-suomi':    '14zy',
+      'satakunta':          '14zz',
+      'kanta-hame':         '151a',
+      'pirkanmaa':          '151b',
+      'paijat-hame':        '151c',
+      'kymenlaakso':        '151d',
+      'etela-karjala':      '151e',
+      'etela-savo':         '151f',
+      'pohjois-savo':       '151g',
+      'pohjois-karjala':    '151h',
+      'keski-suomi':        '151i',
+      'etela-pohjanmaa':    '151j',
+      'pohjanmaa':          '151k',
+      'keski-pohjanmaa':    '151l',
+      'pohjois-pohjanmaa':  '151m',
+      'kainuu':             '151n',
+      'lappi':              '151p',
     },
     // A4: Turnout by demographics — 2025 only (verified by scan_tables.mjs)
     voter_turnout_by_demographics: {
-      age_group:       'statfin_alvaa_pxt_157b',  // [koko_suomi>äänestysalue]
-      education:       'statfin_alvaa_pxt_157c',
-      origin_language: 'statfin_alvaa_pxt_157d',
-      income_quintile: 'statfin_alvaa_pxt_157e',
-      activity:        'statfin_alvaa_pxt_157f',
+      age_group:       '157b',  // [koko_suomi>äänestysalue]
+      education:       '157c',
+      origin_language: '157d',
+      income_quintile: '157e',
+      activity:        '157f',
     },
   },
   {
@@ -583,22 +583,22 @@ export const EU_TABLES: ElectionTableSet[] = [
     election_type: 'eu_parliament',
     year: 2024,
     database: DATABASE.active,
-    party_by_kunta:    'statfin_euvaa_pxt_14gv',    // 1996–2024, covers all EU years
+    party_by_kunta:    '14gv',    // 1996–2024, covers all EU years
     party_schema:      EU_PARTY_SCHEMA,
     // Year-specific all-areas table: use when areaId is omitted to avoid 403 on 14gv
-    party_by_aanestysalue:        'statfin_euvaa_pxt_14h2',
+    party_by_aanestysalue:        '14h2',
     party_by_aanestysalue_schema: EU_YEAR_PARTY_SCHEMA,
-    candidate_national: 'statfin_euvaa_pxt_14gy',   // all candidates, national totals only
+    candidate_national: '14gy',   // all candidates, national totals only
     // EU candidate tables by area (A2)
-    candidate_by_vaalipiiri:         'statfin_euvaa_pxt_14gx',  // all candidates, 14 vaalipiirit
-    candidate_by_aanestysalue_eu:    'statfin_euvaa_pxt_14gw',  // requires candidate_id filter
+    candidate_by_vaalipiiri:         '14gx',  // all candidates, 14 vaalipiirit
+    candidate_by_aanestysalue_eu:    '14gw',  // requires candidate_id filter
     geographic_unit_type: 'national',
     voter_turnout_by_demographics: {
-      age_group:       'statfin_euvaa_pxt_14ha',
-      education:       'statfin_euvaa_pxt_14hb',
-      origin_language: 'statfin_euvaa_pxt_14hc',
-      income_quintile: 'statfin_euvaa_pxt_14hd',
-      activity:        'statfin_euvaa_pxt_14he',
+      age_group:       '14ha',
+      education:       '14hb',
+      origin_language: '14hc',
+      income_quintile: '14hd',
+      activity:        '14he',
     },
   },
   {
@@ -621,17 +621,17 @@ export const PRESIDENTIAL_TABLES: ElectionTableSet[] = [
     database: DATABASE.active,
     // No party dimension in presidential elections
     // All areas (national + vaalipiiri + kunta + äänestysalue) in one table
-    candidate_national: 'statfin_pvaa_pxt_14d5',
+    candidate_national: '14d5',
     // Multi-year vaalipiiri table: candidate votes by vaalipiiri, 1994–2024 (A3)
-    candidate_multiyr_vaalipiiri: 'statfin_pvaa_pxt_14db',
+    candidate_multiyr_vaalipiiri: '14db',
     geographic_unit_type: 'national',
-    turnout_by_aanestysalue: 'statfin_pvaa_pxt_14d6',
+    turnout_by_aanestysalue: '14d6',
     voter_turnout_by_demographics: {
-      age_group:       'statfin_pvaa_pxt_14nk',     // has Kierros var — loader filters to round 1
-      education:       'statfin_pvaa_pxt_14nl',
-      origin_language: 'statfin_pvaa_pxt_14nm',
-      income_quintile: 'statfin_pvaa_pxt_14nn',
-      activity:        'statfin_pvaa_pxt_14np',
+      age_group:       '14nk',     // has Kierros var — loader filters to round 1
+      education:       '14nl',
+      origin_language: '14nm',
+      income_quintile: '14nn',
+      activity:        '14np',
     },
   },
 ];

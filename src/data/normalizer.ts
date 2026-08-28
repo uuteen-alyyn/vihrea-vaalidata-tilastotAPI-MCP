@@ -1,3 +1,12 @@
+import {
+  findVariable,
+  findMeasureVariable,
+  findMeasureCodesByText,
+  AREA_HINTS,
+  CANDIDATE_HINTS,
+  OUTCOME_HINTS,
+  ROUND_HINTS,
+} from '../api/variable-resolver.js';
 import type { PxWebResponse, PxWebColumn, PxWebTableMetadata } from '../api/types.js';
 import type { ElectionRecord, ElectionType, AreaLevel } from './types.js';
 import type { PartyTableSchema } from './election-tables.js';
@@ -287,44 +296,35 @@ export function normalizeCandidateByAanestysalue(
   const keyIdx = buildKeyIndex(response.columns);
   const valIdx = buildValueIndex(response.columns);
 
-  // Detect area variable — try each known name; null means national-only (no area var).
-  // 'Vaalipiiri' is used by EU 14gx (candidate votes by vaalipiiri).
-  const AREA_VAR_CANDIDATES = ['Alue/Äänestysalue', 'Äänestysalue', 'Alue', 'Vaalipiiri'];
-  const AREA_KEY = metadata.variables.find(
-    (v) => AREA_VAR_CANDIDATES.includes(v.code)
-  )?.code ?? null;
+  // Area variable — null means national-only (no area dimension).
+  const areaVar  = findVariable(metadata, AREA_HINTS);
+  const AREA_KEY = areaVar?.code ?? null;
 
   const areaTexts      = AREA_KEY ? buildValueTextMap(metadata, AREA_KEY) : new Map<string, string>();
 
-  // Detect candidate variable.
-  // 'Ehdokas' is used by parliamentary/municipal/regional/presidential tables.
-  // 'Puolue ja ehdokas' is used by EU 14gx (candidates mixed with party aggregates in one dim).
-  const CANDIDATE_KEY = metadata.variables.find(
-    (v) => v.code === 'Ehdokas' || v.code === 'Puolue ja ehdokas'
-  )?.code ?? 'Ehdokas';
+  // Candidate variable. EU 14gx uses 'Puolue ja ehdokas', which mixes party
+  // aggregates in with the candidates.
+  const candidateVar  = findVariable(metadata, CANDIDATE_HINTS);
+  const CANDIDATE_KEY = candidateVar?.code ?? 'Ehdokas';
 
-  // When using 'Puolue ja ehdokas', skip non-numeric codes (party aggregates like VIHR, SDP).
-  const candidateVarIsMixed = CANDIDATE_KEY === 'Puolue ja ehdokas';
+  // When the candidate dimension is the mixed EU one, skip non-numeric codes
+  // (party aggregates like VIHR, SDP).
+  const candidateVarIsMixed = candidateVar?.text === 'Puolue ja ehdokas'
+    || candidateVar?.code === 'Puolue ja ehdokas';
 
   const candidateTexts = buildValueTextMap(metadata, CANDIDATE_KEY);
 
-  // Detect measure variable (Tiedot or Äänestystiedot / Puolueiden kannatus)
-  const tiedotVar = metadata.variables.find(
-    (v) => v.code === 'Tiedot' || v.code === 'Äänestystiedot' || v.code === 'Puolueiden kannatus'
-  );
-  const VOTES_KEY = tiedotVar?.values.find(
-    (_, i) => (tiedotVar.valueTexts[i] ?? '').toLowerCase().includes('äänimäärä') ||
-              (tiedotVar.valueTexts[i] ?? '').toLowerCase().includes('äänet')
-  ) ?? 'evaa_aanet';
-  const SHARE_KEY = tiedotVar?.values.find(
-    (_, i) => (tiedotVar.valueTexts[i] ?? '').toLowerCase().includes('osuus')
-  ) ?? 'evaa_osuus_aanista';
+  // Measure variable and its vote/share codes, matched on the Finnish value texts.
+  const tiedotVar = findMeasureVariable(metadata);
+  const measureCodes = findMeasureCodesByText(tiedotVar);
+  const VOTES_KEY = measureCodes.votes ?? 'evaa_aanet';
+  const SHARE_KEY = measureCodes.share ?? 'evaa_osuus_aanista';
 
-  // Detect election outcome variable (parliamentary / municipal / regional)
-  const VALINTA_KEY = metadata.variables.some((v) => v.code === 'Valintatieto') ? 'Valintatieto' : null;
+  // Election outcome variable (parliamentary / municipal / regional)
+  const VALINTA_KEY = findVariable(metadata, OUTCOME_HINTS)?.code ?? null;
 
-  // Detect round variable (presidential)
-  const roundVar  = metadata.variables.find((v) => v.code === 'Kierros');
+  // Round variable (presidential)
+  const roundVar  = findVariable(metadata, ROUND_HINTS);
   const ROUND_KEY = roundVar?.code ?? null;
   // Build round code → round number map: first value = 1, second = 2
   const roundCodeToNumber = new Map<string, number>();
@@ -342,7 +342,7 @@ export function normalizeCandidateByAanestysalue(
 
   if (tiedotIsKey) {
     // ── Archive Sar-dimension format (2019 parliamentary, 2019 EU archive) ──
-    const TIEDOT_KEY = tiedotVar?.code ?? 'Äänestystiedot';
+    const TIEDOT_KEY = tiedotVar?.code ?? 'Äänestystiedot';  // archive tables name it thus
     const tiedotIdx  = keyIdx[TIEDOT_KEY];
     const votesByKey  = new Map<string, { votes: number; areaCode: string; candidateCode: string; roundNum?: number; valintaCode?: string }>();
     const sharesByKey = new Map<string, number>();

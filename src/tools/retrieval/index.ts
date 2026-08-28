@@ -3,6 +3,14 @@ import { z } from 'zod';
 import { pxwebClient } from '../../api/pxweb-client.js';
 import { withCache } from '../../cache/cache.js';
 import {
+  findVariable,
+  requireVariable,
+  findYearVariable,
+  findMeasureVariable,
+  AREA_HINTS,
+  GENDER_HINTS,
+} from '../../api/variable-resolver.js';
+import {
   normalizePartyByKunta,
   normalizeCandidateByAanestysalue,
 } from '../../data/normalizer.js';
@@ -182,18 +190,31 @@ export function registerRetrievalTools(server: McpServer): void {
       const tableId = tables.turnout_by_aanestysalue;
       const metadata = await fetchTableMetadata(dbPath, tableId);
 
+      // Resolve the declared roles to this table's actual variable codes.
+      const yearVar    = findYearVariable(metadata);
+      const genderVar  = findVariable(metadata, GENDER_HINTS);
+      const areaVar    = requireVariable(metadata, AREA_HINTS, 'area', tableId);
+      const measureVar = findMeasureVariable(metadata);
+
       const query = {
         query: [
-          { code: 'Vuosi', selection: { filter: 'item' as const, values: [String(year)] } },
-          { code: 'Sukupuoli', selection: { filter: 'item' as const, values: ['SSS'] } },
+          ...(yearVar
+            ? [{ code: yearVar.code, selection: { filter: 'item' as const, values: [String(year)] } }]
+            : []),
+          ...(genderVar
+            ? [{ code: genderVar.code, selection: { filter: 'item' as const, values: ['SSS'] } }]
+            : []),
           {
-            code: 'Alue',
+            code: areaVar.code,
             selection: area_id
               ? { filter: 'item' as const, values: [area_id] }
               : { filter: 'all' as const, values: ['*'] },
           },
-          // Request all Tiedot values to get full turnout picture
-          { code: 'Tiedot', selection: { filter: 'all' as const, values: ['*'] } },
+          // Request every measure to get the full turnout picture
+          {
+            code: measureVar?.code ?? 'contentscode',
+            selection: { filter: 'all' as const, values: ['*'] },
+          },
         ],
         response: { format: 'json' as const },
       };
@@ -209,7 +230,7 @@ export function registerRetrievalTools(server: McpServer): void {
       };
 
       // Return raw with column descriptions for turnout (it has many Tiedot measures)
-      const tiedotVar = metadata.variables.find((v) => v.code === 'Tiedot');
+      const tiedotVar = measureVar;
       const measureDescriptions = Object.fromEntries(
         (tiedotVar?.values ?? []).map((v, i) => [v, tiedotVar?.valueTexts[i] ?? v])
       );

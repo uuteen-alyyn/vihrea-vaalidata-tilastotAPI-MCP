@@ -17,6 +17,17 @@
 import type { PxWebResponse, PxWebTableMetadata } from '../api/types.js';
 import type { VoterBackgroundRow, VoterTurnoutDemographicRow, ElectionType } from './types.js';
 import { buildKeyIndex, buildValueIndex, buildValueTextMap } from './normalizer.js';
+import {
+  findVariable,
+  requireVariable,
+  findYearVariable,
+  findMeasureVariable,
+  requireContentCode,
+  AREA_HINTS,
+  GENDER_HINTS,
+  ROUND_HINTS,
+  BACKGROUND_DIMENSION_HINTS,
+} from '../api/variable-resolver.js';
 
 // ── Shared ────────────────────────────────────────────────────────────────────
 
@@ -80,25 +91,38 @@ export function normalizeVoterBackground(
   const keyIdx = buildKeyIndex(response.columns);
   const valIdx = buildValueIndex(response.columns);
 
-  // Gender variable name differs by election type; fall back to Sukupuoli
-  const genderVar = genderVarName(electionType);
-  const genderKeyIdx = keyIdx[genderVar] ?? keyIdx['Sukupuoli'];
-  const taustaKeyIdx = keyIdx['Taustamuuttujat'];
+  // Gender variable label differs by election type; the resolver falls back
+  // through the other known labels before giving up.
+  const genderVarCode = requireVariable(
+    metadata, [genderVarName(electionType), ...GENDER_HINTS], 'gender', metadata.title
+  ).code;
+  const taustaVarCode = requireVariable(
+    metadata, BACKGROUND_DIMENSION_HINTS, 'background_dimension', metadata.title
+  ).code;
+
+  const genderKeyIdx = keyIdx[genderVarCode];
+  const taustaKeyIdx = keyIdx[taustaVarCode];
 
   if (genderKeyIdx === undefined || taustaKeyIdx === undefined) {
     throw new Error(
       `normalizeVoterBackground: expected key columns not found ` +
-      `(genderVar=${genderVar}, found keys=${Object.keys(keyIdx).join(',')})`
+      `(gender=${genderVarCode}, dimension=${taustaVarCode}, ` +
+      `found keys=${Object.keys(keyIdx).join(',')})`
     );
   }
 
-  const lkm1Idx = valIdx['lkm1'];
-  const prosIdx  = valIdx['pros'];
+  // Content codes gained a subject prefix in July 2026: lkm1 → evaa-lkm1.
+  const measureVar = findMeasureVariable(metadata);
+  const lkm1Idx = valIdx[requireContentCode(measureVar, 'lkm1', metadata.title)];
+  const prosIdx = valIdx[requireContentCode(measureVar, 'pros', metadata.title)];
   if (lkm1Idx === undefined || prosIdx === undefined) {
-    throw new Error(`normalizeVoterBackground: Tiedot columns lkm1/pros not found`);
+    throw new Error(
+      `normalizeVoterBackground: count/share measure columns not found in response ` +
+      `(found values=${Object.keys(valIdx).join(',')})`
+    );
   }
 
-  const taustaTextMap = buildValueTextMap(metadata, 'Taustamuuttujat');
+  const taustaTextMap = buildValueTextMap(metadata, taustaVarCode);
   const rows: VoterBackgroundRow[] = [];
 
   for (const row of response.data) {
@@ -158,9 +182,6 @@ const AGE_CODE_TO_GROUP = new Map<string, string>(
 /** Codes that represent totals or unknowns — stripped from turnout output */
 const TURNOUT_STRIP_CODES = new Set(['SSS', '09', '9', 'X']);
 
-/** Variable codes that are never the dimension variable in a turnout table */
-const KNOWN_NON_DIM_CODES = new Set(['Sukupuoli', 'Alue', 'Kierros', 'Vuosi']);
-
 /**
  * Normalize a voter turnout by demographics API response.
  * Returns rows for all three genders; caller may filter by gender if needed.
@@ -182,26 +203,38 @@ export function normalizeVoterTurnoutByDemographics(
   const suffix = TIEDOT_SUFFIX[electionType];
   if (!suffix) throw new Error(`normalizeVoterTurnoutByDemographics: unknown electionType ${electionType}`);
 
-  const eligibleIdx = valIdx[`aoiky_al_${suffix}`];
-  const votesIdx    = valIdx[`a_al_${suffix}`];
+  const measureVar  = findMeasureVariable(metadata);
+  const eligibleIdx = valIdx[requireContentCode(measureVar, `aoiky_al_${suffix}`, metadata.title)];
+  const votesIdx    = valIdx[requireContentCode(measureVar, `a_al_${suffix}`, metadata.title)];
   if (eligibleIdx === undefined || votesIdx === undefined) {
     throw new Error(
-      `normalizeVoterTurnoutByDemographics: measure columns aoiky_al_${suffix}/a_al_${suffix} not found`
+      `normalizeVoterTurnoutByDemographics: measure columns aoiky_al_${suffix}/a_al_${suffix} not found ` +
+      `(found values=${Object.keys(valIdx).join(',')})`
     );
   }
 
-  // Detect the dimension variable from the response columns
-  // (it's the only dimension column that isn't a known non-dimension variable)
+  const genderVar = requireVariable(metadata, GENDER_HINTS, 'gender', metadata.title);
+  const areaVar   = findVariable(metadata, AREA_HINTS);
+  const roundVar  = findVariable(metadata, ROUND_HINTS);
+  const yearVar   = findYearVariable(metadata);
+
+  // The dimension variable is whatever remains once the known roles are named.
+  // It differs per table (Koulutusaste, Tulokvintiili, Ikäluokka, …) and is the
+  // thing the caller actually asked for, so it cannot be listed in advance.
+  const knownCodes = new Set(
+    [genderVar.code, areaVar?.code, roundVar?.code, yearVar?.code, measureVar?.code]
+      .filter((c): c is string => c !== undefined)
+  );
   const dimVarCode = response.columns
-    .filter((c) => (c.type === 'd' || c.type === 't') && !KNOWN_NON_DIM_CODES.has(c.code))
+    .filter((c) => (c.type === 'd' || c.type === 't') && !knownCodes.has(c.code))
     .map((c) => c.code)[0];
   if (!dimVarCode) {
     throw new Error(`normalizeVoterTurnoutByDemographics: dimension variable not found in response columns`);
   }
 
   const dimKeyIdx     = keyIdx[dimVarCode];
-  const genderKeyIdx  = keyIdx['Sukupuoli'];
-  const kierrosKeyIdx = keyIdx['Kierros'];
+  const genderKeyIdx  = keyIdx[genderVar.code];
+  const kierrosKeyIdx = roundVar ? keyIdx[roundVar.code] : undefined;
 
   if (dimKeyIdx === undefined || genderKeyIdx === undefined) {
     throw new Error(`normalizeVoterTurnoutByDemographics: expected key columns missing`);
