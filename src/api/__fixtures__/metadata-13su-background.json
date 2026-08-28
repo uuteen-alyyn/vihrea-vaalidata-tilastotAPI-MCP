@@ -1,0 +1,147 @@
+{
+ "title": "Äänioikeutettujen, ehdokkaiden ja valittujen taustoja eduskuntavaaleissa muuttujina Vuosi, Sukupuoli, Äänioikeutetut, ehdokkaat ja valitut, Taustamuuttujat ja Tiedot",
+ "variables": [
+  {
+   "code": "timeperiod_y",
+   "text": "Vuosi",
+   "values": [
+    "2011",
+    "2015",
+    "2019",
+    "2023"
+   ],
+   "valueTexts": [
+    "2011",
+    "2015",
+    "2019",
+    "2023"
+   ]
+  },
+  {
+   "code": "sukupuoli_9_20180101",
+   "text": "Sukupuoli",
+   "values": [
+    "SSS",
+    "1",
+    "2"
+   ],
+   "valueTexts": [
+    "Yhteensä",
+    "Miehet",
+    "Naiset"
+   ],
+   "elimination": true
+  },
+  {
+   "code": "vaalitiedot_24_20201103",
+   "text": "Äänioikeutetut, ehdokkaat ja valitut",
+   "values": [
+    "00S1",
+    "0S11",
+    "1002",
+    "1102",
+    "1107",
+    "1101",
+    "1100",
+    "1104",
+    "1103",
+    "1106",
+    "1105",
+    "1129",
+    "1999",
+    "2002",
+    "3002"
+   ],
+   "valueTexts": [
+    "Suomessa asuvat äänioikeutetut",
+    "Suomessa asuvat 18-64-vuotiaat äänioikeutetut",
+    "Ehdokkaat yhteensä",
+    "Ehdokkaat SDP",
+    "Ehdokkaat PS",
+    "Ehdokkaat KOK",
+    "Ehdokkaat KESK",
+    "Ehdokkaat VIHR",
+    "Ehdokkaat VAS",
+    "Ehdokkaat RKP",
+    "Ehdokkaat KD",
+    "Ehdokkaat LIIKE",
+    "Ehdokkaat Muut",
+    "Valitut yhteensä",
+    "Valitut, uudet"
+   ]
+  },
+  {
+   "code": "vaalitiedot_28_20220101",
+   "text": "Taustamuuttujat",
+   "values": [
+    "SSS",
+    "ptoSSS",
+    "pto11",
+    "pto12",
+    "pto22",
+    "pto24",
+    "pto99",
+    "kouSSS",
+    "kou1_9",
+    "kou3_4",
+    "kou5",
+    "kou6",
+    "kou7_8",
+    "sekSSS",
+    "sek1",
+    "sek2",
+    "sek3",
+    "sek8",
+    "des1",
+    "des10",
+    "kifise",
+    "kisv",
+    "ki02",
+    "kiX",
+    "sy2"
+   ],
+   "valueTexts": [
+    "Yhteensä",
+    "1 Pääasiallinen toiminta yhteensä",
+    "1.1 Työlliset",
+    "1.2 Työttömät",
+    "1.3 Opiskelijat",
+    "1.4 Eläkeläiset",
+    "1.5 Muu pääasiallinen toiminta",
+    "2 Koulutus yhteensä",
+    "2.1 Vain perusaste",
+    "2.2 Toinen aste",
+    "2.3 Alin korkea-aste",
+    "2.4 Alempi korkeakouluaste",
+    "2.5 Ylempi korkeakouluaste, tutkijakoulutus",
+    "3 Työnantajasektori yhteensä",
+    "3.1 Yksityinen",
+    "3.2 Valtio",
+    "3.3 Kunta",
+    "3.4 Yrittäjä",
+    "4.1 Alimpaan tulokymmenykseen kuuluvat",
+    "4.2 Ylimpään tulokymmenykseen kuuluvat",
+    "5.1 Suomen- tai saamenkielinen",
+    "5.2 Ruotsinkielinen",
+    "5.3 Vieraskielinen",
+    "5.4 Kieli tuntematon",
+    "6 Ulkomaalaistaustainen"
+   ],
+   "elimination": true
+  },
+  {
+   "code": "contentscode",
+   "text": "Tiedot",
+   "values": [
+    "evaa-lkm1",
+    "evaa-pros_sp",
+    "evaa-pros"
+   ],
+   "valueTexts": [
+    "Lukumäärä (lkm.)",
+    "Osuus sukupuolittain (%)",
+    "Osuus (%)"
+   ]
+  }
+ ]
+}

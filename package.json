@@ -11,7 +11,8 @@
     "start:http": "node dist/server-http.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:live": "RUN_LIVE_TESTS=1 CACHE_FILE=./cache-store.contract.json vitest run src/contract.live.test.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0"

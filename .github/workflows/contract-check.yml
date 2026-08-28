@@ -1,0 +1,45 @@
+# Weekly check that Statistics Finland's PxWeb contract still matches what this
+# server sends.
+#
+# On 2026-07-01 Statistics Finland renamed every table and variable code. Every
+# tool here broke and the 169-test suite stayed green, because all of it runs
+# against hand-written fixtures. Nobody noticed for eight weeks. This job is the
+# thing that would have noticed.
+#
+# Deliberately NOT run on pull requests: an upstream outage or rate-limit block
+# must not fail an unrelated PR. The drift window that caused the incident was
+# months, so weekly is ample.
+
+name: PxWeb contract check
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'      # Mondays 06:00 UTC
+  workflow_dispatch:
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - run: npm ci
+
+      # Uses a throwaway cache file so the run cannot pass on stale responses.
+      - name: Query the live API
+        run: npm run test:live
+
+      - name: Explain a failure
+        if: failure()
+        run: |
+          echo "::error::The live PxWeb contract check failed."
+          echo "Either Statistics Finland changed the contract again, or the API is down."
+          echo "A 400 means OUR request is malformed — usually a table id or variable"
+          echo "code that no longer exists upstream. The test output names the table,"
+          echo "the role and the variables the table actually offers."
+          echo "See docs/api-notes.md and src/api/variable-resolver.ts."

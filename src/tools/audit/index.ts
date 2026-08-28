@@ -151,24 +151,26 @@ const TABLE_DESCRIPTIONS: Record<string, {
   area_code_format: string;
   used_by: string[];
 }> = {
-  statfin_evaa_pxt_13sw: {
-    table_id: 'statfin_evaa_pxt_13sw',
+  '13sw': {
+    table_id: '13sw',
     title: 'Party votes by municipality (vaalipiiri ja kunta vaalivuonna), parliamentary elections',
     coverage: 'All parliamentary elections 1983–2023. All municipalities. National, vaalipiiri, and kunta levels.',
     variables: ['Vuosi (year)', 'Sukupuoli (gender — use SSS for total)', 'Puolue (party)', 'Vaalipiiri ja kunta vaalivuonna (area)', 'Tiedot (measures: evaa_aanet votes, evaa_osuus_aanista vote share, etc.)'],
+    // Names, not codes: since 2026-07 PxWeb codes are versioned (puolue_19_20230101)
+    // and are resolved per request from table metadata — see api/variable-resolver.ts.
     area_code_format: 'SSS = national total, {vp:02}{kunta:03} e.g. 010091 = Helsinki (VP01 + KU091), {vp:02}0000 = vaalipiiri total',
     used_by: ['get_party_results', 'get_area_results', 'get_election_results', 'get_rankings', 'analyze_party_profile', 'compare_parties', 'compare_elections', 'find_area_overperformance', 'find_area_underperformance', 'analyze_geographic_concentration', 'analyze_vote_distribution', 'find_vote_decline_areas', 'estimate_vote_transfer_proxy', 'rank_areas_for_party', 'get_area_profile', 'compare_areas', 'analyze_area_volatility', 'find_strongholds', 'find_weak_zones'],
   },
-  statfin_evaa_pxt_13sx: {
-    table_id: 'statfin_evaa_pxt_13sx',
+  '13sx': {
+    table_id: '13sx',
     title: 'Voter turnout by voting area (äänestysalue), parliamentary elections',
     coverage: '2023 parliamentary election. All äänestysalueet. Includes advance votes and election-day votes.',
     variables: ['Vuosi (year)', 'Sukupuoli (gender)', 'Alue (area)', 'Tiedot (measures: turnout %, eligible voters, votes cast, etc.)'],
     area_code_format: 'Same as candidate tables: VP## (vaalipiiri), KU### (kunta), alphanumeric (äänestysalue)',
     used_by: ['get_turnout'],
   },
-  'statfin_evaa_pxt_13t6–13ti': {
-    table_id: 'statfin_evaa_pxt_13t6 through statfin_evaa_pxt_13ti (13 tables)',
+  '13t6–13ti': {
+    table_id: '13t6 through 13ti (13 tables)',
     title: 'Candidate votes by äänestysalue per vaalipiiri, 2023 parliamentary election',
     coverage: '2023 parliamentary election only. One table per vaalipiiri (13 total). All candidates × all äänestysalueet.',
     variables: ['Vuosi (year)', 'Alue/Äänestysalue (area)', 'Ehdokas (candidate — valueText: "Name / Party / Vaalipiiri")', 'Valintatieto (election result — use SSS for total)', 'Tiedot (evaa_aanet votes, evaa_osuus_aanista share)'],
@@ -362,56 +364,56 @@ export function registerAuditTools(server: McpServer): void {
         caveats: string[];
       }> = {
         get_party_results: {
-          source_tables: ['statfin_evaa_pxt_13sw'],
+          source_tables: ['13sw'],
           query_filters: ['Vuosi = year', 'Sukupuoli = SSS (gender total)', 'Puolue = party_id or all', 'Vaalipiiri ja kunta vaalivuonna = area_id or all', 'Tiedot = evaa_aanet, evaa_osuus_aanista'],
           normalization: ['normalizePartyByKunta()', 'area_level inferred from 6-digit code format (SSS → koko_suomi, XX0000 → vaalipiiri, XXXXXX → kunta)', 'party_name from valueTexts'],
           transformations: ['None — raw normalized rows returned in data mode', 'In analysis mode: sorted by votes, ranked'],
           caveats: ['party_id_numeric_codes'],
         },
         get_candidate_results: {
-          source_tables: ['statfin_evaa_pxt_13t6–13ti (one or all 13 depending on vaalipiiri parameter)'],
+          source_tables: ['13t6–13ti (one or all 13 depending on vaalipiiri parameter)'],
           query_filters: ['Vuosi = year', 'Alue/Äänestysalue = area_id or all', 'Ehdokas = candidate_id or all', 'Valintatieto = SSS (total)', 'Tiedot = evaa_aanet, evaa_osuus_aanista'],
           normalization: ['normalizeCandidateByAanestysalue()', 'area_level inferred (VP## → vaalipiiri, KU### → kunta, else → aanestysalue)', 'candidate name/party/vaalipiiri parsed from valueText "Name / Party / Vaalipiiri"'],
           transformations: ['Multiple vaalipiiri tables merged when no vaalipiiri filter specified'],
           caveats: ['candidate_data_2023_only', 'national_candidate_query_slow'],
         },
         analyze_candidate_profile: {
-          source_tables: ['statfin_evaa_pxt_13t6–13ti (one per specified vaalipiiri)'],
+          source_tables: ['13t6–13ti (one per specified vaalipiiri)'],
           query_filters: ['All rows for the vaalipiiri loaded; filtered to candidate_id after fetch'],
           normalization: ['normalizeCandidateByAanestysalue()'],
           transformations: ['Rank computed from sorted vaalipiiri-level (VP##) rows', 'rank_within_party: sorted party candidates at VP level', 'share_of_party_vote_pct: (candidate_votes / sum(all party candidate votes at VP level)) × 100', 'Geographic analysis uses äänestysalue rows only (no double-counting)'],
           caveats: ['candidate_data_2023_only'],
         },
         compare_elections: {
-          source_tables: ['statfin_evaa_pxt_13sw (single table, queried once per year)'],
+          source_tables: ['13sw (single table, queried once per year)'],
           query_filters: ['Vuosi = year (per election)', 'Sukupuoli = SSS', 'Puolue = all', 'Area = area_id or SSS'],
           normalization: ['normalizePartyByKunta()', 'Party matched by party_id or party_name (case-insensitive)'],
           transformations: ['Vote change = votes_year2 - votes_year1', 'Vote share change = share_year2 - share_year1 (in pp)', 'Rank change = rank_year1 - rank_year2 (positive = improved)'],
           caveats: ['municipality_boundary_changes', 'party_id_numeric_codes'],
         },
         estimate_vote_transfer_proxy: {
-          source_tables: ['statfin_evaa_pxt_13sw (queried twice: year1 and year2)'],
+          source_tables: ['13sw (queried twice: year1 and year2)'],
           query_filters: ['All parties and areas loaded per year', 'Filtered to losing_party and gaining_party after fetch'],
           normalization: ['normalizePartyByKunta()'],
           transformations: ['For each kunta: compute loser_change = votes2 - votes1, gainer_change = votes2 - votes1', 'co_movement = "consistent_with_transfer" if loser_change < 0 AND gainer_change > 0'],
           caveats: ['vote_transfer_proxy_only', 'municipality_boundary_changes'],
         },
         find_area_overperformance: {
-          source_tables: ['Party: statfin_evaa_pxt_13sw', 'Candidate: statfin_evaa_pxt_13t6–13ti'],
+          source_tables: ['Party: 13sw', 'Candidate: 13t6–13ti'],
           query_filters: ['Party: filtered by subject_id at kunta level', 'Candidate: all rows for vaalipiiri, then filtered to candidate_id'],
           normalization: ['normalizePartyByKunta() / normalizeCandidateByAanestysalue()'],
           transformations: ['overperformance_pp = area_vote_share - baseline', 'Party baseline = national vote share (koko_suomi row)', 'Candidate baseline = vaalipiiri vote share (VP## row)'],
           caveats: [],
         },
         analyze_area_volatility: {
-          source_tables: ['statfin_evaa_pxt_13sw (queried once per year)'],
+          source_tables: ['13sw (queried once per year)'],
           query_filters: ['area_id filter applied; all parties returned'],
           normalization: ['normalizePartyByKunta()', 'SSS party total row excluded from computation'],
           transformations: ['Pedersen index computed per consecutive year pair', 'biggest_gainer / biggest_loser = max/min absolute change'],
           caveats: ['municipality_boundary_changes', 'sss_party_total_row'],
         },
         rank_areas_for_party: {
-          source_tables: ['statfin_evaa_pxt_13sw (queried once per reference_year, once per trend_year if provided)'],
+          source_tables: ['13sw (queried once per reference_year, once per trend_year if provided)'],
           query_filters: ['All parties and areas loaded; filtered to subject party after fetch'],
           normalization: ['normalizePartyByKunta()'],
           transformations: ['4-component composite score. See explain_metric(composite_score) for full formula.'],

@@ -5,6 +5,7 @@
  * fuzzy-match a query name to a candidate_id before fetching actual results.
  */
 
+import { requireVariable, CANDIDATE_HINTS } from '../api/variable-resolver.js';
 import { getElectionTables, getDatabasePath } from './election-tables.js';
 import { fetchMetadataCached } from './loaders.js';
 import type { ElectionType } from './types.js';
@@ -37,8 +38,7 @@ export async function getCandidateListForUnit(
   }
   const dbPath = getDatabasePath(tables);
   const metadata = await fetchMetadataCached(dbPath, tableId);
-  const candidateVar = metadata.variables.find((v) => v.code === 'Ehdokas');
-  if (!candidateVar) throw new Error('Ehdokas variable not found in candidate table metadata');
+  const candidateVar = requireVariable(metadata, CANDIDATE_HINTS, 'candidate', tableId);
 
   return candidateVar.values.map((code, i) => {
     const text = candidateVar.valueTexts[i] ?? code;
@@ -69,8 +69,7 @@ export async function getCandidatesFromNationalTable(
   const tableId = tables.candidate_national;
   const dbPath = getDatabasePath(tables);
   const metadata = await fetchMetadataCached(dbPath, tableId);
-  const candidateVar = metadata.variables.find((v) => v.code === 'Ehdokas');
-  if (!candidateVar) throw new Error('Ehdokas variable not found in national candidate table');
+  const candidateVar = requireVariable(metadata, CANDIDATE_HINTS, 'candidate', tableId);
 
   const SKIP_CODES = new Set(['00', '11']);
   const entries: CandidateEntry[] = [];
